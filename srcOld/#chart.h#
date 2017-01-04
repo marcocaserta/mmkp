@@ -1,0 +1,47 @@
+/***************************************************************************
+ *   copyright (C) 2013 by Marco Caserta                                   *
+ *   marco dot caserta at ie dot edu                                       *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+/************************ FUNCTIONS ******************************/
+void read_problem_data();
+void create_list_nationalities();
+void create_list_workgroups();
+void create_list_gender();
+void define_network_problem(int nPeriods, int nStudents, int nClusters, int ** x, int * freqHash);
+void compute_summary(IloModel model, IloCplex cplex, FourD x_ilo, int nPeriods, int nStudents, 
+		     int nClusters, int ** x, int * freqHash);
+int solve_cplex(IloModel model, IloCplex cplex, int solLimit, int displayLimit, int timeLimit);
+int hash_pattern(int * stats, int nClusters);
+void read_adjacency_matrix();
+void read_clusters();
+void create_neighborhoods(std::vector < std::vector < int > > & N_set);
+void create_reduced_neighborhoods(std::vector < std::vector < int> > & N_setReduced);
+void define_chart_model(int ** x);
+void read_incompatibilities();
+void get_chart(IloModel model, IloCplex cplex, ThreeD x_ilo);
+void print_options();
+void initialize_sol_data_structure();
+void write_solution(int ** y);
+void write_statistics(int ** s, int ** y, int * freqHash);
+void get_cplex_solution(IloModel model, IloCplex cplex, ThreeD x_ilo, int ** y, int ** s);
+void print_chart(int ** s);
+void add_previous_charts(IloModel & model, FourD & x_ilo);
+int get_student_cluster(int seat_number);
+void add_previous_seats(IloModel & model, ThreeD & x_ilo);
+/************************ FUNCTIONS ******************************/

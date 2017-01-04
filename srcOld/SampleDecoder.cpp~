@@ -1,0 +1,167 @@
+/*
+ * SampleDecoder.cpp
+ *
+ *  Created on: Jan 14, 2011
+ *      Author: rtoso
+ */
+#include <iostream>
+#include <iomanip>
+#include <sstream>
+#include "SampleDecoder.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <RInside.h>
+#include <cassert>
+
+SampleDecoder::SampleDecoder()  { }
+SampleDecoder::~SampleDecoder() { }
+
+using namespace std;
+
+extern int nStudents;
+extern int nPeriods;
+extern int nClusters;
+extern int nSeats;
+extern int   * ub;	                //!< number of seats of each type (E, B, F)
+extern int  ** clusters;               //!< list of seat of each type (E, B, F)
+extern int  ** matrixChart;		//!< seating chart using a matrix structure
+extern int  ** s;		//!< seating chart using a matrix structure
+
+extern int nrowsChart;			//!< seating chart info : nr rows
+extern int ncolsChart;			//!< seating chart info : nr cols
+extern int *** listCluster;		//!< list of students aassigned to each cluster (in each period)
+extern int   * totInCluster;
+
+double SampleDecoder::decode(const std::vector< double >& chromosome, RInside & R, int ** x) const 
+{
+
+#ifdef AAA
+  cout << "================================================" << endl;
+  cout <<"Chromosome is :: ";
+  for (unsigned j = 0; j < chromosome.size(); j++)
+    cout << "    " << chromosome[j];
+  cout << endl;
+  cout << "================================================" << endl;
+  cout << "Current Cluster assignment INSIDE ;; " << endl;
+  for (int i = 0; i < nStudents; i++)
+    {
+      for (int t = 0; t < nPeriods; t++)
+	cout << "stud(" << i << "," << t << ") = " << x[i][t];
+      cout << endl;
+    }
+
+#endif
+
+  int ** used = new (int*[nClusters]);   
+  for (int c = 0; c < nClusters; c++)
+    {
+      used[c] = new int[ub[c]];
+      for (int j = 0; j < ub[c]; j++)
+	used[c][j] = 0;
+    }
+  
+  // encoding (chromosome of length "n"):
+  for (int t = 0; t < nPeriods; t++)
+    {
+      for (int i = 0; i < nSeats; i++)
+	s[t][i] = -1;
+      
+      // assigning students per cluster
+      int progrChrom = 0;
+      for (int c = 0; c < nClusters; c++)
+	{
+#ifdef M_DEBUG
+	  cout << "CLUSTER " << c << endl;
+	  cout << "UB[" << c << "] = " << ub[c] << endl;
+#endif
+	  for (int k = 0; k < totInCluster[c]; k++)
+	    {
+	  int stud_i = listCluster[t][c][k];	 
+	  if (x[stud_i][t] != c) cout << " ## ## ## ## ERROR c1 " << endl; 
+	  
+#ifdef M_DEBUG
+	  cout << "student " << stud_i << " in cluster " << c << " in period " << t << endl;
+	  cout << "student " << stud_i << " random number r :: " << chromosome[progrChrom] << endl;
+#endif
+	  
+	  //int posR = floor(chromosome[progrChrom]*(ub[c]-k+1));
+	  int posR = floor(chromosome[progrChrom]*(ub[c]-k));
+	  //	    cout << "  relative position is " << posR << endl;
+	  assert(posR >= 0 && posR < ub[c]);
+	  int progr = -1;
+	  int pos;
+	  for (pos = 0; pos < ub[c]; pos++)
+	    {
+	      if (used[c][pos] == 0)
+		progr++;
+	      if (progr == posR)
+		break;
+	    }
+	  // 
+	  int seat_i = clusters[c][pos];
+	  //cout << "student " << stud_i << " is assigned to seat " << seat_i << endl;
+	  used[c][pos] = 1;
+	  if (s[t][seat_i] != -1) 
+	    {
+	      cout << "error here -----------------------------------" << endl;
+	      exit(145);
+	    }
+			
+	  s[t][seat_i] = stud_i;
+	  progrChrom++;
+	}
+#ifdef M_DEBUG
+	  int aka;
+	  cin >> aka;
+#endif
+
+    }
+      cout << "Assignment for period " << t << " ########## " << endl;
+      
+      
+      cout << endl << endl;
+      cout << "=========================" << endl;
+      cout << "** ** Seating chart ** **" << endl;
+      cout << "=========================" << endl;
+      cout << endl;
+      for (int t = 0; t < 1; t++)
+	{
+	  cout << endl << endl << " ------------------------------PERIOD " << t+1 <<"-------------------------------" << endl;
+	  for (int i = 0; i < nrowsChart; i++)
+	    {
+	      for (int j = 0; j < ncolsChart; j++)
+		{
+		  int val = matrixChart[i][j]; 
+		  if (val == -1)
+		    cout << setw(4) << " ";
+		  else
+		    if (val == -2)
+		      cout << setw(3) << "  | ";
+		    else
+		      if (s[t][val] == -1)
+			cout << setw(4) << " ";
+		      else
+			cout << setw(4) << s[t][val];
+		}
+	      cout << endl << endl;
+	    }
+	}
+      int aaa;
+      cin >> aaa;
+
+      // reset data structure for relative position
+      for (int c = 0; c < nClusters; c++)
+	for (int j = 0; j < ub[c]; j++)
+	  used[c][j] = 0;
+      
+}
+
+   
+  // REM. : It is minimizing...
+  double score = 1.0 - score;
+   
+cout << "######################## ####################### The score of this chromosome is :: " << score << endl;
+
+
+return (double)score;
+}

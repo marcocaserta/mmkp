@@ -1,0 +1,127 @@
+/***************************************************************************
+ *   copyright (C) 2005 by Marco Caserta                                   *
+ *   marco.caserta@itesm.mx                                                *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+
+/*! \file options.cpp 
+  \brief Read options from command line.
+
+  Options are:
+  -h : help (list of all options)
+  -f : problem instance file" << endl;
+  -t : overall time limit (real)" << endl;
+  -w : number of workgroups available" << endl;
+  -l : large (1) or small (0) neighborhood" << endl;
+  -p : number of periods already defined" << endl;  
+*/
+
+#include <iostream>
+#include <vector>
+#include <cstdlib>
+
+#define   N_def               50 //!< default cross entropy population size
+#define   rho_def            0.1 //!< default cross entropy population size
+#define   alpha_def          0.1 //!< default smoothing factor
+#define   TIME_LIMIT_def     180 //!< default cpu time limit
+#define   MAX_CE_ITE_def     100 //!< max number of CE iters
+#define   MAX_CE_CYCLE_def     5 //!< max number of CE iters
+#define   RND_SEED_def        13 //!< default random seed
+#define   nWG_def              0 //!< default random seed
+#define   NEIGH_def            1 //!< default neighborhood (1-> large)
+#define   nPGIVEN_def          0 //!< default nr of time perids already defined
+
+using namespace std;
+
+extern char* _FILENAME; 	//!< name of the instance file
+extern double time_limit;	//!< wall-clock time limit
+extern int nWG;			//!< number of workgroups available (either 0, 1, 2, or 3)
+extern int largeNeighborhood;   //!< size of the neighborhood (1-> large, 0-> small)
+extern int nPeriodsGiven;	//!< number of time periods already solved
+
+/// Parse command line options
+int parseOptions(int argc, char* argv[])
+{
+   bool setFile      = false;
+   time_limit        = TIME_LIMIT_def;
+   nWG               = nWG_def;
+   largeNeighborhood = NEIGH_def;
+
+   cout <<endl << "SEATING CHART IE v1.0 -- MC 2013(c)" << endl;
+   if (argc == 1)
+   {
+      cout << "No options specified. Try -h " << endl;
+      return -1;
+   }  
+  
+ 
+   int i = 0;
+   while (++i < argc)
+   {
+      const char *option = argv[i];
+      if (*option != '-')
+	 return i;
+      else if (*option == '\0')
+	 return i;
+      else if (*option == '-')
+      {
+	 switch (*++option)
+	 {
+	    case '\0':
+	       return i + 1;
+	    case 'f':
+	       _FILENAME = argv[i+1];
+	       setFile = true;
+	       i++;
+	       break;
+	    case 'p':
+	       nPeriodsGiven = atol(argv[i+1]);
+	       i++;
+	       break;
+	    case 't':
+	       time_limit = atof(argv[i+1]);
+	       i++;
+	       break;
+	    case 'w':
+	       nWG = atol(argv[i+1]);
+	       i++;
+	       break;
+	    case 'l':
+	       largeNeighborhood = atol(argv[i+1]);
+	       i++;
+	       break;
+	    case 'h':
+	       cout << "OPTIONS :: " << endl;
+	       cout << "-f : problem instance file" << endl;
+	       cout << "-a : smoothing factor" << endl;
+	       cout << "-w : number of workgroups available" << endl;
+	       cout << "-l : large (1) or small (0) neighborhood" << endl;
+	       cout << "-p : number of periods already defined" << endl;
+	       cout << endl;
+	       return -1;
+	 }
+      }
+   }
+ 
+   if (setFile)
+      return 0;
+   else
+   {
+      cout <<"Option -f is mandatory. Try ./team -h" << endl;
+      return -1;
+   }
+}

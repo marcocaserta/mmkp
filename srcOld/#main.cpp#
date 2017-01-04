@@ -1,0 +1,346 @@
+
+/***************************************************************************
+ *   copyright (C) 2013 by Marco Caserta                                   *
+ *   marco dot caserta at ie dot edu                                       *
+ *                                                                         *
+ *   This program is free software; you can redistribute it and/or modify  *
+ *   it under the terms of the GNU General Public License as published by  *
+ *   the Free Software Foundation; either version 2 of the License, or     *
+ *   (at your option) any later version.                                   *
+ *                                                                         *
+ *   This program is distributed in the hope that it will be useful,       *
+ *   but WITHOUT ANY WARRANTY; without even the implied warranty of        *
+ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the         *
+ *   GNU General Public License for more details.                          *
+ *                                                                         *
+ *   You should have received a copy of the GNU General Public License     *
+ *   along with this program; if not, write to the                         *
+ *   Free Software Foundation, Inc.,                                       *
+ *   59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.             *
+ ***************************************************************************/
+/**! \file chart.cpp
+   \brief Algorithm for the Seating Chart Assignment Problem
+
+   Author: Marco Caserta (marco dot caserta at ie dot edu)\n
+   Started: 13.08.13\n
+   Ended:   26.08.13\n 
+
+   Compile with: make
+   Execute with: ./bin/chart -f "input_data_file" 
+   Some useful options are:
+   # -w nr.workgroups : This option defines the value of variable "nWG". It defines the number 
+                        of workgroups assignment already known. Depending on when the software
+			is used, the workgroup assigments for terms 1, 2, or 3 could be known. 
+			If this is the case, one of the criteria of the algorithm is to avoid 
+			having students from the same term seating next to each other. 
+
+   # -l neighborhood type : This option defines the value of variable "largeNeighborhood". It
+                        define the type of neighborhood used for the most important 
+                        constraints. Two types of neighborhoods are currently defined, i.e.:
+			SMALL ->      o------X------o
+
+			LARGE ->             o
+			                     |
+				      o------X------o
+				             |
+					     o
+
+			The diffence lies in the size of the neighborhood itself. Of course, the
+			larger the neighborhood, the harder the problem (and, consequently,
+			we experience an increase in running time). 
+   # -t cplex time    : This option defines the value of variable IloMaxTime. It establishes the 
+                        maximum running time given to cplex to solve each phase. Phase 1 (the
+                        cluster assignment problem) is a network problem and takes no time. Phase 2,
+			however, is a much harder problem and often requires around 500 seconds for
+			the typical IMBA instance. A way to reduce the running time is to use a 
+			SMALL neighborhood.
+			
+   # -p nPeriodsGiven : This option allows to read previouosly defined solutions. For example,
+                        imagine that, for a given section, the seating chart of the first term
+			has already been defined. We need to set "-p 1", to ensure that the previous
+			solution is read and that the corresponding variables in the models of phase 1
+			and phase 2 are fixed to the appropriate values (0 or 1). The previous
+			solution(s) should be added as last column(s) in the data file.
+
+   \param A text file selected via command line with the flag "-f input_data_file". The format
+          of the file is specified below and must be strictly respected.
+	  
+   \param A list of disk files, required to characterize and properly define the layout of the
+          room along with other parameters:
+       a) _ADJACENCY = "data/networkLarge.csv". The adjacency matrix for the LARGE version of 
+          the neighborhood. Note that the matrix is symmetric.
+       b) _ADJACENCYREDUCED = "data/networkReduced.csv". The adjacency matrix for the SMALL
+          version of the neighborhood. Note that the matrix is symmetric.
+       c) _FORBIDDEN = "data/forbidden.csv". A binary matrix that defines whether students "i"
+          and "j" can be seated in the same neighborhood (where the definition of the neighborhood
+	  depends on parameters "largeNeighborhood"). Note that this is a hard constraint, i.e.,
+	  in the formulation, this set of constraints is never relaxed and, therefore, depending
+	  on the structure of the matrix, it could lead to an infeasible problem.
+       d) _CLUSTERS = "data/clusters.csv". For each cluster (currently E, B, F), it provides the
+          list of seats included in the cluster itself. The seat number corresponds to the numbers
+	  given in the file _MATRIX -- see point e) below.
+       e) _MATRIX = "data/matrixChart.csv". The MAP that defines the layout of the room itself.
+          It also provides a unique identifier for each seat. The seat numbering used in the code
+	  follows the one provided in this file.
+       f) _EMPTY = "data/emptySeats.csv". A list of spared seat. This list is used whenever the
+          number of seats exceeds the number of students. In decreasing order of priorities, we
+	  establish here which seats should be left empty.
+
+	  
+   \return Two disk files:
+       i. _SOLFILE = "sol/solution.csv". A file containing the best solution found for the three
+          terms. For each student (each row) the seats assigned to each term (1, 2, and 3) are 
+	  provided. The seat numbering is again given by the file _MATRIX. 
+	  (This solution can be manually copied into the initial Excel file.)
+   
+      ii. _OUTPUTFILE = "sol/output.csv". A summary of most relevant statistics that allow
+          to get an idea of the solution quality. This is what should be used to generate a report 
+	  for the user.
+
+   ** OVERALL ALGORITHM
+
+   The algorithm is divided in two parts:
+   - stage 1 : Assignment of students to clustes (E, B, F). We defined two different cost functions
+     that lead to different pattens of assignments. The type of solution chosen here affects the next
+     step.
+    
+   - state 2 : Assignment of students to seats (within the cluster determined in stage 1). Three 
+     types of constraints have been currently defined:
+
+     i. Hard Contraints : Constraints that must be necessarily satisfied. A violation of such 
+     constraints leads to an infeasible solution. These constraints are:
+        - Forbidden matrix: Some students cannot be neighbors (currently due to same lastname).
+
+    ii. Important Constraints : Constraints whose violation is expensive, thus implying a high 
+     priority. We use a binary variable to "relax" each of these constraints. We set a cost
+     in the objective function and attemps to minimize the total cost of violation. Such constraints
+     are:
+        - Neighborhood : No repetition of students in the neighborhood over the three time periods
+	- Nationality  : Students with same nationality should not be in the same neighborhood
+
+   iii. Soft Constraints : Constaints whose violation is cheap. We do not add these constraints
+     in the fist run of cplex. Thus, the first MIP model defined only includes constraints of type
+     i. and ii. We then count then number of violations of soft constraints and, if any exists, 
+     we add these soft constraints to the formulation and re-run cplex. The method used is the same
+     of ii., i.e., we define a binary variable to "relax" each soft constraint and minimize the cost
+     of violation. Such constraints are:
+        - Gender : Women should not be in the same neighborhood
+	- Workgroup : In each period, students belonging to the same workgroup should be in the same
+	  neighborhood.
+	  
+     NOTE : The type of neighborhood used for constraints i. and ii. can be chosen using option -l
+            from the command line (which, in turn, determines the value of variable 
+	    "largeNeighborhood" - 0 or 1). However, constraints iii. only use the small neighborhood,
+	    in an attempt to have, e.g., women not seating next to each other.
+
+  ** MODIFICATIONS
+
+  Add the option of reading previvously defined solutions. Via command line (option -p), we can define
+  the number of seating assigments already defined. Thus, given that the total number of time periods
+  is nPeriods, we only need to solve the problem for the remaining semesters. These solutions, if
+  available, are passed via the same data file, as last column(s). For example, if for a given section
+  we alredy have the seating assigment for the first term, we just need to add a new column to the 
+  data file (at the end of the row for each student) that contains the seat number for that student.
+  We also need to set "-p 1" to ensure that this new column is read.
+
+  The strategy to deal with previous assigments is to fix the corresponding variables to 1, both in
+  the Phase 1 and Phase 2 model. The other variables are thus fixed to zero.
+*/
+#include <ilcplex/ilocplex.h>
+ILOSTLBEGIN
+
+#include <cstdlib>
+#include <limits>
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <ctime>
+#include <cmath>
+#include <vector>
+#include <map>
+#include <string>
+#include <cassert>
+#include <stdexcept>
+
+#include "options.h"
+#include "timer.h"
+
+#include <RInside.h>                    // for the embedded R via RInside
+#include "SampleDecoder.h"		// for the use of bRKGA
+#include "MTRand.h"
+#include "BRKGA.h"
+
+
+// disk files needed to define data structure (see description above)
+char* _FILENAME;                //!< name of the instance file
+char* _FORBIDDEN;                //!< name of the instance file
+const char * _ADJACENCY        = "data/networkLarge.csv";
+const char * _ADJACENCYREDUCED = "data/networkReduced.csv";
+//const char * _FORBIDDEN        = "data/forbidden.csv";
+const char * _CLUSTERS         = "data/clusters.csv";
+const char * _MATRIX           = "data/matrixChart.csv";
+const char * _EMPTY            = "data/emptySeats.csv";
+const char * _SOLFILE          = "sol/solution.csv";
+const char * _OUTPUTFILE       = "sol/output.csv";
+
+typedef IloArray < IloNumVarArray > TwoD;
+typedef IloArray < TwoD > ThreeD;
+typedef IloArray < ThreeD > FourD;
+
+double INFTY = std::numeric_limits<double>::infinity();
+const long _MAXRANDOM = 2147483647;
+const double ZERO     = 0.0e0;
+const double EPSI      = 0.00000001;
+
+int nHash = 13;
+string clusterLabels[] = {"E", "B", "F"};
+string clusterNames[] = {"NA", "NA", "NA", "0-0-3", "0-1-2", "0-2-1", "1-0-2", "1-1-1", "1-2-0", "2-0-1", "2-1-0", "NA","3-0-0"};
+
+// cplex parameters
+int IloMaxTime;			//<! max time given to each run of cplex (option -t to change it)
+const int IloMaxSol  = 150;
+const int IloOutput  = 2;
+
+// input file structure
+const int genderPos  = 0;
+const int natPos     = 9;
+
+// general parameters
+const int nClusters  = 3;	//!< E, B, F
+const int nPeriods   = 3;	//!< thee terms of MBA program
+const int nSeats     = 57;	//!< total number of seats in the room
+int nStudents;
+int nAttributes;
+
+int nrowsChart;			//!< seating chart info : nr rows
+int ncolsChart;			//!< seating chart info : nr cols
+
+double time_limit;	//!< cpu-clock time limit
+int wLS;		//!< with (1) or without (0) local search
+int nWG;                //!< number of worgroups already defined (0,...,3)
+int largeNeighborhood;	//!< type of neighborhood to be used by main constraints (1->large, 0->small)
+int nPeriodsGiven;	//!< number of time periods already solved (some variables must be fixed)
+timer tTime;            //!< Ojbect clock to measure REAL and VIRTUAL (cpu) time
+int withForbidden;	//!< Defines whether a forbidden matrix should be read
+
+int  ** y;			//!< seat assigned in period t to student i
+int  ** s;			//!< student assigned to seat in each period
+int  ** x;			//!< cluster assignment of student i in each period t
+int  ** A;	                //!< adjacency matrix
+int  ** F;			//!< incompatibilities matrix
+int   * ub;	                //!< number of seats of each type (E, B, F)
+int  ** clusters;               //!< list of seat of each type (E, B, F)
+int  ** bin_clusters;		//!< binary indicating whether seat k belongs to cluster c
+int  ** matrixChart;		//!< seating chart using a matrix structure
+int  ** attr;			//!< attributes of students (read from disk file)
+int   * freqHash;		//!< patterns frequencies (phase 1)
+int  ** givenSol;		//!< solution (seat assignment) for previous semesters (if given)
+
+std::vector < std::vector < int> > N_set;
+std::vector < std::vector < int> > N_setReduced;
+std::vector < std::vector < int> > nationalities;
+std::vector < std::vector < std::vector < int > > > workgroups;
+std::map < int, std::vector <int> > genderMap;
+
+int infeasNeigh;  //!< count number of infeasibilities w.r.t. neighborhoods
+int infeasNat;    //!< count number of infeasibilities w.r.t. nationalities
+int infeasGender; //!< count number of infeasibilities w.r.t. gender
+int infeasWG;	  //!< count number of infeasibilities w.r.t. workgroups
+
+
+
+using namespace std;
+
+int main(int argc, char* argv[]) 
+{
+   cout << "starting with brkga ... " << endl;
+   ofstream fsol("bestBRKGA.csv", ios::out);
+   fsol << "Initializing file " << endl;
+   cout << "--------------> Generation[0] " << endl;
+
+
+   //freopen("debug.txt", "w", stdout); //!< redirect output to a file
+   int err = parseOptions(argc, argv);
+   if ( err != 0)
+   { if (err != -1) cout << "Error argument " << err+1 << endl; exit(1); }
+
+   string aa = "NA";
+   if (aa.compare(_FORBIDDEN) == 0)
+   {
+      withForbidden = 0;
+   }
+   else
+      withForbidden = 1;
+
+   cout << "Forbidden is " << _FORBIDDEN << endl;
+   IloMaxTime = time_limit;	// max time assigned to cplex (-t option of command line)
+   
+   read_problem_data();
+   create_list_nationalities();
+   create_list_workgroups();
+   create_list_gender();
+   initialize_sol_data_structure();
+
+   read_adjacency_matrix();   
+   read_clusters();
+   if (withForbidden)
+      read_incompatibilities();
+   print_options();
+
+   tTime.resetTime();		      // start clock
+
+
+   RInside R(argc, argv);              // create an embedded R instance
+
+   const unsigned n = 4;		// size of chromosomes
+   const unsigned p = 25;	// size of population
+   const double pe = 0.20;		// fraction of population to be the elite-set
+   const double pm = 0.10;		// fraction of population to be replaced by mutants
+   const double rhoe = 0.70;	// probability that offspring inherit an allele from elite parent
+   const unsigned K = 3;		// number of independent populations
+   const unsigned MAXT = 2;	// number of threads for parallel decoding
+	
+   SampleDecoder decoder;			// initialize the decoder
+	
+   const long unsigned rngSeed = time(0);	// seed to the random number generator
+   MTRand rng(rngSeed);				// initialize the random number generator
+
+   // initialize the BRKGA-based heuristic
+   BRKGA< SampleDecoder, MTRand > algorithm(n, p, pe, pm, rhoe, decoder, rng, K, MAXT, R);
+	
+   unsigned generation = 0;		// current generation
+   cout << "--------------> Generation[0] " << endl;
+   const unsigned X_INTVL = 5;	// exchange best individuals at every 100 generations
+   const unsigned X_NUMBER = 2;	// exchange top 2 best
+   const unsigned MAX_GENS = 25;	// run for 1000 gens
+   cout << "--------------> Generation[" << generation << "] " << endl;
+
+   do {
+
+      algorithm.evolve();	// evolve the population for one generation
+      cout << "--------------> Generation[" << generation << "] Current best is " << algorithm.getBestFitness() << endl;
+
+      fsol << algorithm.getBestFitness();
+      std::vector <double> bestX =algorithm.getBestChromosome();
+      for (unsigned j = 0; j < bestX.size(); j++)
+	 fsol << "    " << bestX[j];
+      fsol << endl;
+
+      if((++generation) % X_INTVL == 0) {
+	 algorithm.exchangeElite(X_NUMBER);	// exchange top individuals
+      }
+   } while (generation < MAX_GENS);
+	
+   std::cout << "Best solution found has objective value = "
+	     << algorithm.getBestFitness() << std::endl;
+   std::vector <double> bestX =algorithm.getBestChromosome();
+   for (unsigned j = 0; j < bestX.size(); j++)
+      cout << "    " << bestX[j];
+   cout << endl;
+   for (unsigned j = 0; j < bestX.size(); j++)
+      fsol << "    " << bestX[j];
+   fsol << endl;
+      
+   fsol.close();
+   return 0;
+}
