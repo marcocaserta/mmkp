@@ -36,6 +36,8 @@
 #define   PROP_ZERO_def   0.0
 #define   PROP_ONE_def    0.0
 #define   ADD_CUT_def     0
+#define   OMEGA_def       1.0
+#define   SIGMA_SQ_def    1.0
 
 using namespace std;
 
@@ -47,6 +49,8 @@ extern int nSolBase;
 extern double propFixed0;
 extern double propFixed1;
 extern int add_oldSol_cut;
+extern double Omega;
+extern double sigmaSq;
 
 /// Parse command line options
 int parseOptions(int argc, char* argv[])
@@ -59,6 +63,10 @@ int parseOptions(int argc, char* argv[])
    propFixed0        = PROP_ZERO_def;
    propFixed1        = PROP_ONE_def;
    add_oldSol_cut    = ADD_CUT_def;
+   Omega             = OMEGA_def;
+   sigmaSq           = SIGMA_SQ_def;
+
+
 
    cout <<endl << "MMKP v1.0 -- MC 2015(c)" << endl;
    if (argc == 1)
@@ -114,7 +122,15 @@ int parseOptions(int argc, char* argv[])
 	       max_iter = atoi(argv[i+1]);
 	       i++;
 	       break;
-	    case 'h':
+        case 'o':
+           Omega = atof(argv[i+1]);
+           i++;
+           break;
+        case 's':
+           sigmaSq = atof(argv[i+1]);
+           i++;
+           break;
+        case 'h':
 	       cout << "OPTIONS :: " << endl;
 	       cout << "-f : problem instance file" << endl;
 	       cout << "-t : overall time limit (real)" << endl;
@@ -124,6 +140,8 @@ int parseOptions(int argc, char* argv[])
 	       cout << "-u : % of vars fixed to 1 (soft fixed)" << endl;
 	       cout << "-a : activate cut feasible solution (1-> Yes, 0-> No)" << endl;
 	       cout << "-i : max number lagrangean iterations" << endl;
+	       cout << "-o : Omega (robust formulation) " << endl;
+	       cout << "-s : sigma squared (item uncertainty)" << endl; 
 	       cout << endl;
 	       return -1;
 	 }

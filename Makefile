@@ -32,7 +32,7 @@ CPLEXINCDIR   = $(CPLEXDIR)/include
 # ---------------------------------------------------------------------
 # END ILOG CPLEX stuff
 
-CCOPT     = -m64 -O -fPIC -fexceptions  -DIL_STD  -DOPTIMAL 
+CCOPT     = -m64 -O -fPIC -fexceptions  -DIL_STD  -DOPTIMAL -DNDEBUG
 #-DNDEBUG
 CCLNFLAGS = -L$(CPLEXLIBDIR) -lilocplex -lcplex -L$(CONCERTLIBDIR) -lconcert -lm -pthread
 CCFLAGS   = $(CCOPT) -I$(CPLEXINCDIR) -I$(CONCERTINCDIR) 
