@@ -1,1 +1,6 @@
-This is a git repo.
+Multiple Choice Multidimensional Knapsack Proble.
+
+An algorithm based on Lagrangean Relaxation and the Corridor Method is defined.
+We solve both the deterministic version and the robust version. Some special
+cases for the robust version are derived, depending on the structure of the
+variance-covariance matrix.
