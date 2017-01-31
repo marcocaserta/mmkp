@@ -30,7 +30,7 @@
 #include <cstdlib>
 
 #define   TIME_LIMIT_def  1000	 //!< default wall-clock time limit
-#define   ITER_LIMIT_def  2000	 //!< default lagrangean iterations
+#define   ITER_LIMIT_def  500	 //!< default lagrangean iterations
 #define   CORRIDOR_def    0.9
 #define   NSOL_def        3
 #define   PROP_ZERO_def   0.0

@@ -63,8 +63,8 @@ FLAGS = $(DEBUG) $(OPTLEVEL) -DIL_STD -fexceptions -fPIC -pipe -Wparentheses -Wr
 
 #default: $(OBJDIR)/SampleDecoder.o $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/mmkp.o $(OBJDIR)/options.o $(OBJDIR)/timer.o 
 #	$(CC) -g $(CCFLAGS) $(RINCLUDE) $(CTIME) $(OBJDIR)/SampleDecoder.o $(OBJDIR)/options.o $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/timer.o $(OBJDIR)/mmkp.o -o $(BINDIR)/$(EXEC)# $(CCLNFLAGS)
-default: $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/mmkp.o $(OBJDIR)/options.o $(OBJDIR)/timer.o 
-	$(CC) -g $(CCFLAGS) $(RINCLUDE) $(CTIME) $(OBJDIR)/options.o $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/timer.o $(OBJDIR)/mmkp.o -o $(BINDIR)/$(EXEC) $(CCLNFLAGS)
+default: $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/mmkp.o $(OBJDIR)/options.o $(OBJDIR)/timer.o $(OBJDIR)/robust.o 
+	$(CC) -g $(CCFLAGS) $(RINCLUDE) $(CTIME) $(OBJDIR)/options.o $(OBJDIR)/lagrange.o $(OBJDIR)/cplex.o $(OBJDIR)/timer.o $(OBJDIR)/mmkp.o $(OBJDIR)/robust.o -o $(BINDIR)/$(EXEC) $(CCLNFLAGS)
 
 $(OBJDIR)/mmkp.o: $(SRCDIR)/mmkp.cpp 
 	$(CC) -c $(CCFLAGS) $(CTIME) $(SRCDIR)/mmkp.cpp -o $(OBJDIR)/mmkp.o
@@ -72,6 +72,8 @@ $(OBJDIR)/lagrange.o: $(SRCDIR)/lagrange.cpp
 	$(CC) -c $(CCFLAGS) $(CTIME) $(SRCDIR)/lagrange.cpp -o $(OBJDIR)/lagrange.o 
 $(OBJDIR)/cplex.o: $(SRCDIR)/cplex.cpp
 	$(CC) -c $(CCFLAGS) $(CTIME) $(SRCDIR)/cplex.cpp -o $(OBJDIR)/cplex.o 
+$(OBJDIR)/robust.o: $(SRCDIR)/robust.cpp
+	$(CC) -c $(CCFLAGS) $(CTIME) $(SRCDIR)/robust.cpp -o $(OBJDIR)/robust.o 
 $(OBJDIR)/options.o: $(SRCDIR)/options.cpp
 	$(CC) -c -g $(FLAGS) $(CTIME) $(SRCDIR)/options.cpp -o $(OBJDIR)/options.o
 $(OBJDIR)/timer.o: $(SRCDIR)/timer.cpp
