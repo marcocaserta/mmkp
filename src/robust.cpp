@@ -62,6 +62,7 @@ extern double INFTY;
 typedef IloArray < IloNumVarArray > TwoD;
 
 extern double zBest;
+extern int * xBest;
 extern int max_iter;             // max number lagrangean iterations
 
 extern double time_limit;        // !< wall-clock time limit
@@ -222,9 +223,10 @@ void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
     } // END OF LAGRANGEAN CYCLE -- repeat 3 times
 
-    //fix_to_zero(rc, ubStar, zBest);
-    //corridor_method(model, cplex, x_ilo, obj, xIlo, zBest, rc, xIlo);
-    //corridor_method(model, cplex, x_ilo, obj, xLBest, zBest, (double **)inp.c);
+    // copy best feasible solution into xBest
+    for (int i = 0; i < inp.nC; i++) 
+        xBest[i] = xIlo[i];
+
 }
 
 /// Get first feasible solution
@@ -233,6 +235,7 @@ double get_first_lb(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjecti
 {
 
     defineRobustModel(model, cplex, x_ilo, obj, Q_ilo, Omega, sigma2);
+
 
     double statusBin = solve_KNAP(model, cplex, 3, 0, 10000); // call cplex
     // double statusBin = solve_KNAP(model, cplex, 9999, 4, 10000); // call cplex

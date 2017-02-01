@@ -142,19 +142,22 @@ int stopping_criteria(int iter, int max_iter, double time_limit);
 
 double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex, 
         TwoD & x_ilo, IloObjective & obj, IloNumVar & Q_ilo, 
-        double Omega, double * sigma2, int * xNominal, double zNominal);
+        double Omega, double * sigma2, int * xBest, double &zBest);
 
 double solve_nominal_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex, 
         TwoD & x_ilo, IloObjective & obj, int * xNominal, double & zNominal);
 
-void computeSigmaSq(INSTANCE inp, double * sigma2);
+double computeSigmaSq(INSTANCE inp, double * sigma2);
 void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         TwoD & x_ilo, IloObjective & obj, IloNumVar & Q_ilo, double Omega, 
         double * sigma2);
 
 // void dp_scheme(INSTANCE inp);
 void quickSort(int* rc, int* x, int low, int high);
-int is_feasible(const char * solutionFile, INSTANCE inp);
+int is_feasible(const char * solutionFile, INSTANCE inp, int * xNominal, 
+        double &zNominal);
+void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNominal,
+        double zBest, int nRuns, double SSsigma);
 /************************ FUNCTIONS ******************************/
 
 
@@ -179,16 +182,20 @@ int main(int argc, char *argv[])
     read_problem_data(inp); // read instance data
     print_options(inp);
 
-    int feasibilityCheck = 0;
+    // read solution from disk file (solutionFile)
+    int feasibilityCheck = 1;
+    double zNominal = 0.0;
+    int * xNominal  = new int[inp.nC];
     if (feasibilityCheck)
     {
-        cout << "Is Solution Feasible = " << is_feasible(solutionFile, inp) << endl;
-        exit(123);
+        cout << "Is Solution Feasible = " << is_feasible(solutionFile, inp, 
+                xNominal, zNominal ) << endl;
+        // exit(123);
     }
 
     // dp_scheme(inp);
-    sigma2 = new double[inp.nC];
-    computeSigmaSq(inp, sigma2);
+    sigma2         = new double[inp.nC];
+    double SSsigma = computeSigmaSq(inp, sigma2);
 
     tTime.resetTime();
 
@@ -197,9 +204,9 @@ int main(int argc, char *argv[])
     F0 = new int*[inp.nC];
     for (int i = 0; i < inp.nC; i++)
         F0[i] = new int[inp.ri[i]];
-    zBest     = ZERO;    
-    ubStar    = INFTY;
-    xBest = new int[inp.nC]; // store best solution
+    zBest  = ZERO;
+    ubStar = INFTY;
+    xBest  = new int[inp.nC]; // store best solution
 
     /// cplex stuff
     IloEnv env;
@@ -212,19 +219,21 @@ int main(int argc, char *argv[])
 
     IloNumVar Q_ilo(env, 0.0, IloInfinity, IloNumVar::Float);
 
-    double zNominal = -1.0; // obj function value nominal pbr
-    int * xNominal = new int[inp.nC];
+    // double zNominal = -1.0; // obj function value nominal pbr
+    // int * xNominal = new int[inp.nC];
     // NOTE: Activate this to compare Nominal vs Robust
+    // To avoid solving the nominal problem all the time, we store the solution
+    // in a disk file and simply read the nominal solution from disk.
     // solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal);
 
     // solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-    // sigma2, xNominal, zNominal);
+            // sigma2, xBest, zBest);
 
     // call lagrangean phase (subgradient optimization)
     // lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
 
     robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-    sigma2);
+            sigma2);
 
     fsol << _FILENAME << "\t" << zBest << "\t" << best_time << "\t" 
         << ubStar << "\t" << bestIter << "\t" << corridorWidthBase 
@@ -239,16 +248,156 @@ int main(int argc, char *argv[])
     fIrace << -zBest << endl;
     env.end();
 
+#ifdef W_OPT
     // save best solution to disk
     ofstream ffsol(solutionFile, ios::out);
     for (int i = 0; i < inp.nC; i++) 
         ffsol << xBest[i] << "\t";
    ffsol << endl;
+#endif
 
+   // analysis of robust solution for I07 --> zBest (nominal) = 24595
+   int nRuns       = 1000;
+   robust_simulation(inp, xBest, xNominal, zNominal, zBest, nRuns, SSsigma);
 
-    return zBest;		// return value to brkGA for 
+   return zBest;		// return value to brkGA for 
 
 }
+
+
+// Simulate the creation of nRuns random vectors w[i][j][k] and compute how 
+// often the robust and the nominal solutions lead to infeasible situations.
+/** It is worth noting that, in reality, we do not need to compute the number
+ * of times the nominal solution leads to infeasibility, since the nominal 
+ * solution never changes. However, since for every value of Omega we generate
+ * different w vectors, we recompute the number of infeasibility for the 
+ * nominal solution as well. This number should be pretty much constant.
+ */
+void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNominal,
+        double zBest, int nRuns, double SSsigma)
+{
+
+    cout << "This is the current solution ;; " << endl;
+    cout << "z^N vs z^R = " << zNominal << " " << zBest << endl;
+    // cout << "CM solution :: ";
+    // for (int i = 0; i < inp.nC; i++)
+    // {
+        // cout << " " << xBest[i];
+    // }
+    // cout << endl;
+    // cout << "NOMINAL solution :: ";
+    // for (int i = 0; i < inp.nC; i++)
+    // {
+        // cout << " " << xNominal[i];
+    // }
+ 
+    // now evaluate solution with random generated 
+    int ** wN = new int*[inp.nC];
+    for (int i = 0; i < inp.nC; i++)
+        wN[i] = new int[inp.nR];
+
+    int ** wR = new int*[inp.nC];
+    for (int i = 0; i < inp.nC; i++)
+        wR[i] = new int[inp.nR];
+
+    // =============== EVAL ======================
+    int totInfeasible        = 0;
+    int totInfeasibleNominal = 0;
+    for (int cc = 0; cc < nRuns; cc++)
+    {
+        // cout << "Iter " << cc << endl;
+
+        for (int i = 0; i < inp.nC; i++)
+        {
+            for (int k = 0; k < inp.nR; k++)
+            {
+                double rr = (double)(rand()+1)/((double)(RAND_MAX)+1.0);
+                if (rr <= 0.5)
+                {
+                    wR[i][k] = inp.w[i][xBest[i]][k] - sigma2[i];
+                    wN[i][k] = inp.w[i][xNominal[i]][k] - sigma2[i];
+                }
+                else
+                {
+                    wN[i][k] = inp.w[i][xNominal[i]][k] + sigma2[i];
+                    wR[i][k] = inp.w[i][xBest[i]][k] + sigma2[i];
+                }
+            }
+        }
+
+        // this is what we have done
+        /* cout << "Comparison of nominal vs real :: " << endl;
+         * for (int i = 0; i < inp.nC; i++)
+         * {
+         *     cout << "Item " << xBest[i] << " ... " << endl;
+         *     for (int k = 0; k < inp.nR; k++)
+         *     {
+         *         cout << inp.w[i][xBest[i]][k] << " vs " << wR[i][k] << endl;
+         *     }
+         * } */
+
+        // is robust solution feasible?
+        for (int k = 0; k < inp.nR; k++)
+        {
+            double tot = 0.0;
+            for (int i = 0; i < inp.nC; i++) 
+                tot += wR[i][k];
+            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
+            if (tot > inp.R[k])
+            {
+                // cout << "Infeasible in constraint " << k << endl;
+                totInfeasible++;
+
+                break;
+            }
+        }
+
+        // is nominal solution feasible?
+        for (int k = 0; k < inp.nR; k++)
+        {
+            double tot = 0.0;
+            for (int i = 0; i < inp.nC; i++) 
+                tot += wN[i][k];
+            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
+            if (tot > inp.R[k])
+            {
+                // cout << "Infeasible in constraint " << k << endl;
+                totInfeasibleNominal++;
+                break;
+            }
+        }
+    }
+
+    cout << " [" << totInfeasible << "/" << nRuns << "]" 
+        << endl;
+
+    cout << " [" << totInfeasibleNominal << "/" << nRuns << "]" 
+        << endl;
+
+    string sRatio;
+    if (zBest != -1)
+    {
+        double ratio = (zNominal - zBest)/zNominal;
+        stringstream ss;
+        ss << ratio;
+        sRatio = ss.str();
+    }
+    else
+        sRatio = "-";
+
+
+
+    // write info to diskfile
+    ofstream fRandom("robust.txt", ios::out);
+    fRandom << zNominal << "\t" << totInfeasibleNominal << "\t" 
+        << zBest << "\t" << sRatio << "\t" << Omega << "\t" << 
+        SSsigma/(double)inp.nC << "\t" 
+        << totInfeasible << "\t" << nRuns << endl; 
+    fRandom.close();
+}
+
+
+
 /************************ FUNCTIONS ******************************/
 /// Functions
 /************************ FUNCTIONS ******************************/
@@ -303,27 +452,29 @@ void read_problem_data(INSTANCE & inp)
 }
 
 // Check whether a solution saved on disk is feasible
-int is_feasible(const char * solutionFile, INSTANCE inp)
+int is_feasible(const char * solutionFile, INSTANCE inp, int * xNominal, 
+        double & zNominal)
 {
     ifstream fsol(solutionFile, ios::in);
-    int * x = new int[inp.nC];
+    // int * x = new int[inp.nC];
     for (int i = 0; i < inp.nC; i++) 
-        fsol >> x[i];
+        fsol >> xNominal[i];
     fsol.close();
 
     int isFeasible = 1;
-    double z = 0.0;
+    // double z = 0.0;
+    zNominal = 0.0;
     // check obj function value
     for (int i = 0; i < inp.nC; i++) 
-        z += inp.c[i][x[i]];
-    cout << "z* = " << z  << endl; 
+        zNominal += inp.c[i][xNominal[i]];
+    cout << "z*_nom = " << zNominal  << endl; 
 
     // check feasible solution
     for (int k = 0; k < inp.nR; k++) 
     {
         int totR = 0;
         for (int i = 0; i < inp.nC; i++) 
-            totR += inp.w[i][x[i]][k];
+            totR += inp.w[i][xNominal[i]][k];
 
         cout << "lhs( " << k << ") = " << totR << " vs rhs = "<< inp.R[k];
         if (totR > inp.R[k])
@@ -333,19 +484,19 @@ int is_feasible(const char * solutionFile, INSTANCE inp)
         }
         else
             cout << "  v  " << endl;
-        
     }
 
     return isFeasible;
 }
 
 
-void computeSigmaSq(INSTANCE inp, double * sigma2)
+double computeSigmaSq(INSTANCE inp, double * sigma2)
 {
     // some statistics
     double * avg = new double[inp.nC];
     double tot = 0.0;
 
+    double SSsigma = 0.0;
     for (int i = 0; i < inp.nC; i++)
     {
         // avg profit per group
@@ -357,15 +508,17 @@ void computeSigmaSq(INSTANCE inp, double * sigma2)
         avg[i] /= (double)inp.ri[i];
         tot += avg[i];
 
-        cout << "Avg Profit Class " << i << " = " << avg[i] << endl;
+        // cout << "Avg Profit Class " << i << " = " << avg[i] << endl;
     }
 
     for (int i = 0; i < inp.nC; i++)
     {
         sigma2[i] =  0.8 + avg[i]/tot;
         sigma2[i] = 1.0;
+        SSsigma += sigma2[i];
         // cout << "SigmaSq[" << i << "] = " << sigma2[i] << endl;
     }
+    return SSsigma;
 }
 
 /// Print instance info and algorithmic parameters.
@@ -620,7 +773,8 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
         {
             // note: zL in an "upper bound" of the optimal value
             zL = lagrange_step(lambda, xL, iter, rc);
-            cout << "LB( " << iter << " ) = " << zL << endl;
+            if ((iter % (2*Freq)) == 0)
+                cout << "LB( " << iter << " ) = " << zL << endl;
             if (zL < ubStar)
                 update_best(xLBest, xL, ubStar, zL, lambda, lambdaBest);
 
