@@ -179,7 +179,7 @@ int main(int argc, char *argv[])
     read_problem_data(inp); // read instance data
     print_options(inp);
 
-    int feasibilityCheck = 1;
+    int feasibilityCheck = 0;
     if (feasibilityCheck)
     {
         cout << "Is Solution Feasible = " << is_feasible(solutionFile, inp) << endl;
@@ -187,8 +187,8 @@ int main(int argc, char *argv[])
     }
 
     // dp_scheme(inp);
-    // sigma2 = new double[inp.nC];
-    // computeSigmaSq(inp, sigma2);
+    sigma2 = new double[inp.nC];
+    computeSigmaSq(inp, sigma2);
 
     tTime.resetTime();
 
@@ -214,17 +214,17 @@ int main(int argc, char *argv[])
 
     double zNominal = -1.0; // obj function value nominal pbr
     int * xNominal = new int[inp.nC];
+    // NOTE: Activate this to compare Nominal vs Robust
     // solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal);
-    //
+
     // solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
     // sigma2, xNominal, zNominal);
-    //
-    //
-    // call lagrangean phase (subgradient optimization)
-    lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
 
-    // robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-    // sigma2);
+    // call lagrangean phase (subgradient optimization)
+    // lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
+
+    robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
+    sigma2);
 
     fsol << _FILENAME << "\t" << zBest << "\t" << best_time << "\t" 
         << ubStar << "\t" << bestIter << "\t" << corridorWidthBase 
@@ -360,14 +360,11 @@ void computeSigmaSq(INSTANCE inp, double * sigma2)
         cout << "Avg Profit Class " << i << " = " << avg[i] << endl;
     }
 
-    int abc;
-    cin >> abc;
-
     for (int i = 0; i < inp.nC; i++)
     {
         sigma2[i] =  0.8 + avg[i]/tot;
         sigma2[i] = 1.0;
-        cout << "SigmaSq[" << i << "] = " << sigma2[i] << endl;
+        // cout << "SigmaSq[" << i << "] = " << sigma2[i] << endl;
     }
 }
 
@@ -906,13 +903,13 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
     if (statusBin >= -1.0+EPSI) 
     {
-        //#ifdef M_DEBUG
+#ifdef M_DEBUG
         cout << " ... repaired solution is " << statusBin << "(z* = " <<  zBest << ") with cplex status :: " 
             << cplex.getStatus() << ". Params: [ zeros = " << count0 << ", ones = " << width1 << "/" 
             << nFixed1 << "]" << endl;
 
         // cout << "Nr. Constraints before cutting out solutions is : " << cplex.getNrows() << endl;
-        //#endif
+#endif
 
         int * xRepaired = new int[inp.nC];
         get_cplex_sol(model, cplex, x_ilo, xRepaired);

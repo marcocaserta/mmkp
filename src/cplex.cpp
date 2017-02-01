@@ -126,7 +126,7 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         cout << "CPLEX = " << cplex.getStatus() << endl;
         int totInfeasible = 0;
         int totInfeasibleNominal = 0;
-        int nRuns = 1000;
+        int nRuns = 0;
         if (statusBin == -1)
         {
             cout << "No feasible solution found " << endl; 
@@ -139,14 +139,16 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
             for (int i = 0; i < inp.nC; i++)
                 for (int j = 0; j < inp.ri[i]; j++)
                     if (cplex.getValue(x_ilo[i][j]) >= 1.0 - EPSI)
-                        xIlo[i] = j;		
+                        xIlo[i] = j;
 
-            // cout << "z*[" << u << "," << sigmaSq*u <<"] = " << cplex.getObjValue();
-            cout << "z*[" << Omega << "," <<  SSsigma/(double)inp.nC <<"] = " << cplex.getObjValue();
+            // cout << "z*[" << u << "," << sigmaSq*u <<"] = " 
+            // << cplex.getObjValue();
+            cout << "z*[" << Omega << "," <<  SSsigma/(double)inp.nC <<"] = " 
+                << cplex.getObjValue();
 
             for (int i = 0; i < inp.nC; i++)
-                cout << " " << xIlo[i];	   
-            cout << endl; 
+                cout << " " << xIlo[i];
+            cout << endl;
 
             // get solution
             //int * xIlo = new int[inp.nC];
@@ -154,25 +156,25 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
             for (int i = 0; i < inp.nC; i++)
                 for (int j = 0; j < inp.ri[i]; j++)
                     if (cplex.getValue(x_ilo[i][j]) >= 1.0 - EPSI)
-                        xIlo[i] = j;		
+                        xIlo[i] = j;
             for (int i = 0; i < inp.nC; i++)
                 cout << "x[" << i <<  "] = " << xIlo[i] << endl;
 
 
             // now evaluate solution with random generated 
             int ** wN = new int*[inp.nC];
-            for (int i = 0; i < inp.nC; i++) 
+            for (int i = 0; i < inp.nC; i++)
                 wN[i] = new int[inp.nR];
 
             int ** wR = new int*[inp.nC];
-            for (int i = 0; i < inp.nC; i++) 
+            for (int i = 0; i < inp.nC; i++)
                 wR[i] = new int[inp.nR];
 
             // =============== EVAL ======================
             double * rVector = new double[inp.nC*nRuns];
             for (int cc = 0; cc < nRuns; cc++)
             {
-                //cout << "Iter " << cc << endl;
+                cout << "Iter " << cc << endl;
 
                 for (int i = 0; i < inp.nC; i++)
                 {
@@ -194,15 +196,15 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
                 }
 
                 // this is what we have done
-                /* cout << "Comparison of nominal vs real :: " << endl;
-                 * for (int i = 0; i < inp.nC; i++)
-                 * {
-                 *     cout << "Item " << xIlo[i] << " ... " << endl;
-                 *     for (int k = 0; k < inp.nR; k++)
-                 *     {
-                 *         cout << inp.w[i][xIlo[i]][k] << " vs " << wR[i][k] << endl;
-                 *     }
-                 * } */
+                cout << "Comparison of nominal vs real :: " << endl;
+                for (int i = 0; i < inp.nC; i++)
+                {
+                    cout << "Item " << xIlo[i] << " ... " << endl;
+                    for (int k = 0; k < inp.nR; k++)
+                    {
+                        cout << inp.w[i][xIlo[i]][k] << " vs " << wR[i][k] << endl;
+                    }
+                }
 
                 // is it feasible?
                 for (int k = 0; k < inp.nR; k++)

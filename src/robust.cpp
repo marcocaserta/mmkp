@@ -147,7 +147,7 @@ void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         double cWidth     = corridorWidthBase;   // <---------- used to be 0.8
         int iterImproved  = 200;
         int nSol          = nSolBase;		// nr of solutions for cplex
-        int Freq          = 40;
+        int Freq          = 20;
 
         double zL, bestLagr, worstLagr;
 
@@ -162,15 +162,15 @@ void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         while (!stopping_criteria(iter, max_iter, time_limit) && !stopping)
         {
             // note: zL in an "upper bound" of the optimal value
-            // zL = lagrange_step(lambda, xL, iter, rc, Omega, sigma2);
-            zL = lagrange_step_SOCP(inp, Omega, sigma2, xL, lambda, iter, rc);
-            cout << "Lagr(" << iter << ") = " << zL << endl;
+            zL = lagrange_step(lambda, xL, iter, rc, Omega, sigma2);
+            // zL = lagrange_step_SOCP(inp, Omega, sigma2, xL, lambda, iter, rc);
+            if ((iter % (2*Freq)) == 0)
+                cout << "Lagr(" << iter << ") = " << zL << endl;
             if (zL < ubStar)
                 update_best(xLBest, xL, ubStar, zL, lambda, lambdaBest);
 
-            stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, zL, zBest, iter, 
-                    best300, start300, sigma2);
-
+            stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, 
+                    zL, zBest, iter, best300, start300, sigma2); 
             if (iter > 199) 	// start fixing schemes
             {
                 fix2one = true;
@@ -180,15 +180,12 @@ void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
             // refine lagrange solution to obtain a valid lower bound
             // if (iter > 100 && (iter % Freq) == 0)
             // if (iter >= 300 )
-            if (iter >= 50 )
+            if (iter >= 100 && (iter % Freq)== 0)
             {
-
-                lb = refine_solution(model, cplex, x_ilo, obj, xL, cWidth, nSol, zBest, 
-                        xIlo, iterImproved, iter, rc, fix2zero, fix2one, 
-                        cutSol, lagrIter);
-
-
-            }            
+                lb = refine_solution(model, cplex, x_ilo, obj, xL, cWidth, 
+                        nSol, zBest, xIlo, iterImproved, iter, rc, fix2zero, 
+                        fix2one, cutSol, lagrIter);
+            }
 
             if ((iter > 250) && (iter - iterImproved) > 100)
             {
@@ -237,7 +234,7 @@ double get_first_lb(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjecti
 
     defineRobustModel(model, cplex, x_ilo, obj, Q_ilo, Omega, sigma2);
 
-    double statusBin = solve_KNAP(model, cplex, 3, 4, 10000); // call cplex
+    double statusBin = solve_KNAP(model, cplex, 3, 0, 10000); // call cplex
     // double statusBin = solve_KNAP(model, cplex, 9999, 4, 10000); // call cplex
     cout << "Status :: " << statusBin << endl;
     cout << "CPLEX = " << cplex.getStatus() << endl;
@@ -318,7 +315,8 @@ double lagrange_step(double * lambda, int * xL, int iter, double ** rc,
             double ss = 0.0;
             for (int k = 0; k < inp.nR; k++)
             {
-                rc[i][j] -= lambda[k]*(inp.w[i][j][k] + Omega*sqrt(sigma2[i])/sqrt(inp.nC));
+                rc[i][j] -= lambda[k]*(inp.w[i][j][k] 
+                        + Omega*sqrt(sigma2[i])/sqrt(inp.nC));
                 // rc[i][j] -= lambda[k]*(inp.w[i][j][k] - Omega*sigma2[i]);
                 // rc[i][j] -= lambda[k]*inp.w[i][j][k];
 
@@ -431,18 +429,16 @@ double lagrange_step_SOCP(INSTANCE & inp, double Omega, double * sigma2,
     try 
     {
         zL = solve_KNAP(modelL, cplexL, 99998, 0, 1); // call cplex
-        cout << "zL(cplex)= " << zL;
+        // cout << "zL(cplex)= " << zL;
         if (zL != -1)
         {
             // add final term to lagragean function
             for (int k = 0; k < inp.nR; k++)
                 zL += lambda[k]*inp.R[k];
 
-            cout << " Total = " << zL << endl;
+            // cout << " Total = " << zL << endl;
             // get lagrangean solution
 
-        int aka;
-        cin >> aka;
             for (int i = 0; i < inp.nC; i++)
                 for (int j = 0; j < inp.ri[i]; j++)
                     if (cplexL.getValue(xL_ilo[i][j]) >= 1.0 - EPSI)
