@@ -14,7 +14,7 @@ int main(int argc, char* argv[])
    cout << "--------------> Generation[0] " << endl;
 
    const unsigned n = 5;		// size of chromosomes
-   const unsigned p = 25;	// size of population
+   const unsigned p = 50;	// size of population
    const double pe = 0.20;		// fraction of population to be the elite-set
    const double pm = 0.10;		// fraction of population to be replaced by mutants
    const double rhoe = 0.70;	// probability that offspring inherit an allele from elite parent
@@ -34,7 +34,7 @@ int main(int argc, char* argv[])
 
    const unsigned X_INTVL = 5;	// exchange best individuals at every 100 generations
    const unsigned X_NUMBER = 2;	// exchange top 2 best
-   const unsigned MAX_GENS = 5;	// run for 1000 gens
+   const unsigned MAX_GENS = 20;	// run for 1000 gens
    cout << "--------------> Generation[" << generation << "] " << endl;
 
    do {

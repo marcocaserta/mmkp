@@ -45,7 +45,6 @@ subgradient optimization.
 */
 
 //#define M_DEBUG  // activate this to see the output for debugging
-
 #include <ilcplex/ilocplex.h>
 ILOSTLBEGIN
 
@@ -113,7 +112,9 @@ const long _MAXRANDOM  = 2147483647;
 const double ZERO      = 0.0e0;
 const double EPSI      = 0.00001;
 
-
+double bestLagrHeur = 0.0;
+double zBestCE = 0.0;
+int * xBestCE;
 timer tTime;            //!< Ojbect clock to measure REAL and VIRTUAL (cpu) time
 
 
@@ -154,10 +155,24 @@ void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
 // void dp_scheme(INSTANCE inp);
 void quickSort(int* rc, int* x, int low, int high);
+void quickSort(double * rc, int* x, int low, int high);
 int is_feasible(const char * solutionFile, INSTANCE inp, int * xNominal, 
         double &zNominal);
+int is_feasible(INSTANCE inp, int *x);
 void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNominal,
         double zBest, int nRuns, double SSsigma);
+
+double lagrangean_heuristic(INSTANCE inp, double ** rc);
+void CE(INSTANCE inp, double ** rc, bool fix2zero);
+double compute_fitness(INSTANCE inp, int * x);
+void add_cover_inequality(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
+        int * x, double Omega, double * sigma2);
+void add_cover_inequality2(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
+        int * x, double Omega, double * sigma2); 
+void uplift_cover(INSTANCE inp, IloExpr & uplifted, TwoD & x_ilo, int isCover, 
+        int * x, int group, int el);
+int is_minimal_cover(INSTANCE & inp, int * x, double excess, int group, int el,
+        int constr); 
 /************************ FUNCTIONS ******************************/
 
 
@@ -183,9 +198,10 @@ int main(int argc, char *argv[])
     print_options(inp);
 
     // read solution from disk file (solutionFile)
-    int feasibilityCheck = 1;
-    double zNominal = 0.0;
-    int * xNominal  = new int[inp.nC];
+    int feasibilityCheck = 0;
+    double zNominal      = 0.0;
+    int * xNominal       = new int[inp.nC];
+    xBestCE              = new int[inp.nC];
     if (feasibilityCheck)
     {
         cout << "Is Solution Feasible = " << is_feasible(solutionFile, inp, 
@@ -193,9 +209,14 @@ int main(int argc, char *argv[])
         // exit(123);
     }
 
-    // dp_scheme(inp);
     sigma2         = new double[inp.nC];
     double SSsigma = computeSigmaSq(inp, sigma2);
+
+    cout << " @@@@@@@@@ @@@@@@@@@@@@@@ " << endl;
+    Omega = 0.0;
+    for (int i = 0; i < inp.nC; i++) 
+        sigma2[i] = 0.0;
+
 
     tTime.resetTime();
 
@@ -227,13 +248,13 @@ int main(int argc, char *argv[])
     // solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal);
 
     // solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-            // sigma2, xBest, zBest);
+    // sigma2, xBest, zBest);
 
     // call lagrangean phase (subgradient optimization)
-    // lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
-
-    robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-            sigma2);
+    lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
+    cout << "BEST LAGRANGEAN FOUND = " << bestLagrHeur << endl;
+    // robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
+    // sigma2);
 
     fsol << _FILENAME << "\t" << zBest << "\t" << best_time << "\t" 
         << ubStar << "\t" << bestIter << "\t" << corridorWidthBase 
@@ -253,147 +274,15 @@ int main(int argc, char *argv[])
     ofstream ffsol(solutionFile, ios::out);
     for (int i = 0; i < inp.nC; i++) 
         ffsol << xBest[i] << "\t";
-   ffsol << endl;
+    ffsol << endl;
 #endif
+#ifdef W_ANALYSIS
+    // analysis of robust solution for I07 --> zBest (nominal) = 24595
+    int nRuns       = 1000;
+    robust_simulation(inp, xBest, xNominal, zNominal, zBest, nRuns, SSsigma);
+#endif
+    return zBest;		// return value to brkGA for 
 
-   // analysis of robust solution for I07 --> zBest (nominal) = 24595
-   int nRuns       = 1000;
-   robust_simulation(inp, xBest, xNominal, zNominal, zBest, nRuns, SSsigma);
-
-   return zBest;		// return value to brkGA for 
-
-}
-
-
-// Simulate the creation of nRuns random vectors w[i][j][k] and compute how 
-// often the robust and the nominal solutions lead to infeasible situations.
-/** It is worth noting that, in reality, we do not need to compute the number
- * of times the nominal solution leads to infeasibility, since the nominal 
- * solution never changes. However, since for every value of Omega we generate
- * different w vectors, we recompute the number of infeasibility for the 
- * nominal solution as well. This number should be pretty much constant.
- */
-void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNominal,
-        double zBest, int nRuns, double SSsigma)
-{
-
-    cout << "This is the current solution ;; " << endl;
-    cout << "z^N vs z^R = " << zNominal << " " << zBest << endl;
-    // cout << "CM solution :: ";
-    // for (int i = 0; i < inp.nC; i++)
-    // {
-        // cout << " " << xBest[i];
-    // }
-    // cout << endl;
-    // cout << "NOMINAL solution :: ";
-    // for (int i = 0; i < inp.nC; i++)
-    // {
-        // cout << " " << xNominal[i];
-    // }
- 
-    // now evaluate solution with random generated 
-    int ** wN = new int*[inp.nC];
-    for (int i = 0; i < inp.nC; i++)
-        wN[i] = new int[inp.nR];
-
-    int ** wR = new int*[inp.nC];
-    for (int i = 0; i < inp.nC; i++)
-        wR[i] = new int[inp.nR];
-
-    // =============== EVAL ======================
-    int totInfeasible        = 0;
-    int totInfeasibleNominal = 0;
-    for (int cc = 0; cc < nRuns; cc++)
-    {
-        // cout << "Iter " << cc << endl;
-
-        for (int i = 0; i < inp.nC; i++)
-        {
-            for (int k = 0; k < inp.nR; k++)
-            {
-                double rr = (double)(rand()+1)/((double)(RAND_MAX)+1.0);
-                if (rr <= 0.5)
-                {
-                    wR[i][k] = inp.w[i][xBest[i]][k] - sigma2[i];
-                    wN[i][k] = inp.w[i][xNominal[i]][k] - sigma2[i];
-                }
-                else
-                {
-                    wN[i][k] = inp.w[i][xNominal[i]][k] + sigma2[i];
-                    wR[i][k] = inp.w[i][xBest[i]][k] + sigma2[i];
-                }
-            }
-        }
-
-        // this is what we have done
-        /* cout << "Comparison of nominal vs real :: " << endl;
-         * for (int i = 0; i < inp.nC; i++)
-         * {
-         *     cout << "Item " << xBest[i] << " ... " << endl;
-         *     for (int k = 0; k < inp.nR; k++)
-         *     {
-         *         cout << inp.w[i][xBest[i]][k] << " vs " << wR[i][k] << endl;
-         *     }
-         * } */
-
-        // is robust solution feasible?
-        for (int k = 0; k < inp.nR; k++)
-        {
-            double tot = 0.0;
-            for (int i = 0; i < inp.nC; i++) 
-                tot += wR[i][k];
-            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
-            if (tot > inp.R[k])
-            {
-                // cout << "Infeasible in constraint " << k << endl;
-                totInfeasible++;
-
-                break;
-            }
-        }
-
-        // is nominal solution feasible?
-        for (int k = 0; k < inp.nR; k++)
-        {
-            double tot = 0.0;
-            for (int i = 0; i < inp.nC; i++) 
-                tot += wN[i][k];
-            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
-            if (tot > inp.R[k])
-            {
-                // cout << "Infeasible in constraint " << k << endl;
-                totInfeasibleNominal++;
-                break;
-            }
-        }
-    }
-
-    cout << " [" << totInfeasible << "/" << nRuns << "]" 
-        << endl;
-
-    cout << " [" << totInfeasibleNominal << "/" << nRuns << "]" 
-        << endl;
-
-    string sRatio;
-    if (zBest != -1)
-    {
-        double ratio = (zNominal - zBest)/zNominal;
-        stringstream ss;
-        ss << ratio;
-        sRatio = ss.str();
-    }
-    else
-        sRatio = "-";
-
-
-
-    // write info to diskfile
-    ofstream fRandom("robust.txt", ios::out);
-    fRandom << zNominal << "\t" << totInfeasibleNominal << "\t" 
-        << zBest << "\t" << sRatio << "\t" << Omega << "\t" << 
-        SSsigma/(double)inp.nC << "\t" 
-        << totInfeasible << "\t" << nRuns << endl; 
-    fRandom.close();
 }
 
 
@@ -403,8 +292,6 @@ void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNomina
 /************************ FUNCTIONS ******************************/
 void read_problem_data(INSTANCE & inp)
 {
-
-
 
     int temp;
 
@@ -447,8 +334,32 @@ void read_problem_data(INSTANCE & inp)
                 fdata >> inp.w[i][j][k];
         }
     }
+#ifdef M_DEBUG
+    // analysis of first constraint 
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        cout << "CLASS " << i << " :: " ;
+        for (int j = 0; j < inp.ri[j]; j++) 
+        {
+            cout << "\t" << inp.c[i][j]/(double)inp.w[i][j][0];
+        }
+        cout << endl;
+    }
+#endif
+}
 
+int is_feasible(INSTANCE inp, int * x)
+{
 
+    for (int k = 0; k < inp.nR; k++) 
+    {
+        int totR = 0;
+        for (int i = 0; i < inp.nC; i++) 
+            totR += inp.w[i][x[i]][k];
+        if (totR > inp.R[k]) 
+            return 0;
+    }
+    return 1; 
 }
 
 // Check whether a solution saved on disk is feasible
@@ -549,153 +460,287 @@ void print_options(INSTANCE inp)
 
 }
 
-/**
-// Apply dynamic programming scheme to MMKP
-void dp_scheme(INSTANCE inp)
-{
-
-    int * wMin    = new int[inp.nC];
-    int dl        = 0;
-    int du        = 0;
-    double zMin   = 0;
-    int kk        = 0;
-    int b         = inp.R[kk];
-    cout << "b is = " << b << endl;
-    // solve problem for each class
-    for (int i = 0; i < inp.nC; i++) 
-    {
-        double * zi                  = new double[b+1];
-        int * xi                     = new int[b+1];
-        // sort items w.r.t. weights
-        // sorting vector index w.r.t. vector obj in ascending order
-        int * index = new int[inp.ri[i]+1];
-        int * w     = new int[inp.ri[i]+1];
-        for (int j  = 0; j < inp.ri[i]; j++)
-        {
-            index[j] = j;
-            w[j]     = inp.w[i][j][kk];
-        }
-        index[inp.ri[i]] = inp.ri[i];
-        w[inp.ri[i]]     = b+1;
-
-        cout << "before sorting " << endl;
-        for (int j = 0; j < inp.ri[i]; j++) 
-        {
-            cout << "w[ " << j << " ] " << w[j] << endl;
-        }
-        
-        // sort weights from min to max
-        quickSort(w, index, 0, inp.ri[i]);
-        wMin[i] = w[index[0]];
-        dl += w[index[0]];
-        du += w[index[inp.ri[i]-1]];
-
-        cout << "Sorted weights " << endl;
-        for (int j = 0; j < inp.ri[i]; j++) 
-        {
-            cout << "item ( " << index[j] << " )= " <<  w[index[j]] << endl; 
-        }
-
-        for (int j = 0; j <= b; j++) 
-        {
-            xi[j] = -1;
-            zi[j] = 0.0;
-        }
-        
-        for (int j = 0; j < inp.ri[i]; j++) 
-        {
-            int d = w[index[j]];
-            double p = inp.c[i][index[j]];
-            cout << "d is " << d << endl;
-            cout << "max bwt " << zi[d-1] << " and " << p << endl;
-            if (p > zi[d-1] && p > zi[d])
-            {
-               zi[d] = p;
-               xi[d] = index[j];
-               cout << " setting " << p << " into " << zi[d] << endl;
-            }
-            else if(zi[d-1] >= p)
-            {
-                zi[d] = zi[d-1];
-                xi[d] = xi[d-1];
-            }
-           for (int k = d+1; k < w[index[j+1]]; k++) 
-            {
-               zi[k] = zi[d]; 
-               xi[k] = xi[d];
-            }   
-        }
-        
-        zMin += zi[w[index[0]]];
-        
-       cout << "checking zi function " << endl;
-       for (int d = 0; d <= b; d++) 
-           cout << "zi[ " << d << " ] = " << zi[d] << " with item " << xi[d] << endl;
-
-       int aka;
-       cin >> aka;
-    }
-    // now global dp recursion
-    // verify dl and du
-    cout << "dl and du are " << dl << " " << du << endl;
-
-    cout << "Min z is = " << zMin << endl;
-
-    int dd = du - dl + 1;
-    // double * z = new double[dd];
-    double z * = new double[b];
-    for (int id = 0; id < dl; id++) 
-        z[id] = 0;
-    
-    z[dl] = zMin;
-    // building corresponding solution
-
-    int * xG = new int[inp.nC];
-    for (int i = 0; i < inp.nC; i++) 
-    {
-        j = 0;
-        while (xi[j] == -1)
-            j++;
-        cout << "Class " << i << " selects item " << j << endl;
-        xG[i] = j;
-    }
-    
-
-    for (int id = dl+1; id <= dd; id++) 
-    {
-        for (int i = 0; i < inp.nC[i]; i++) 
-        {
-            jS = xG[i][kk];
-            weight = inp.w[i][jS][k];
-            value = z[id-1] - inp.c[i][jS] + zi[i][weight+1];
-            if (value > z[id-1])
-            {
-                z[id] = value;
-                for (int i = 0; i < inp.nC; i++) 
-                {
-                    
-                }
-                
-                xG[id] = 
-            }
-            z[id] = max()
-        }
-        
-    }
-    
-    int aaa;
-    cin >> aaa;
-
-}
-*/
-
-
 /// Define stopping criteria of the algorithm
 int stopping_criteria(int iter, int max_iter, double time_limit)
 {
     return ( (tTime.elapsedTime(timer::REAL) >= time_limit) ||
             (iter >= max_iter) );
 }
+
+double lagrangean_heuristic(INSTANCE inp, double ** rc)
+{
+    int ** index = new int*[inp.nC];
+    std::vector < std::vector <int> > heap;
+
+    double z = 0.0;
+    int * x = new int[inp.nC];
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        index[i] = new int[inp.ri[i]];
+        double maxC = 0.0;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            index[i][j] = j;
+            if (inp.c[i][j] > maxC) 
+            {
+                maxC = inp.c[i][j];
+                x[i] = j;
+            }
+        }  
+
+        z += inp.c[i][x[i]];
+    }
+    // check feasibility
+    if (is_feasible(inp, x))
+    {
+        cout << "OPT SOL FOUND " << endl;
+        exit(124);
+    }
+
+
+    for (int i = 0; i < inp.nC; i++) 
+        quickSort(rc[i], index[i], 0, inp.ri[i]-1);
+
+    // copy index into heap 
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        std::vector <int> aux;
+        for (int j = 0; j < inp.ri[i]; j++) 
+            if (index[i][j] != x[i])    
+                aux.push_back(index[i][j]);
+        heap.push_back(aux);
+    }
+#ifdef M_DEBUG
+    cout << "The Heap is :: " << endl;
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        cout << "class [" << i << "]  ";
+        for (int j = 0; j < inp.ri[i]; j++) 
+            cout << " "  << index[i][j];
+        cout << endl; 
+        for (std::vector<int>::iterator it = heap[i].begin(); it != heap[i].end(); ++it) 
+        {
+            cout << " "  << *it;
+        }
+
+        cout << endl;
+    } 
+#endif
+
+    // repeat cycle until feasibility is reached
+    while (!is_feasible(inp, x))
+    {
+        double delta = -INFTY;
+        int istar = -1;
+        for (int i = 0; i < inp.nC; i++) 
+        {
+            int cc = heap[i].back();
+            if (rc[i][cc] > delta)
+            {
+                delta = rc[i][cc];
+                istar = i;
+            }
+        }
+        // remove candidate from the heap and update solution
+        z -= inp.c[istar][x[istar]];
+        x[istar] = heap[istar].back();
+        z += inp.c[istar][x[istar]];
+        heap[istar].pop_back();
+
+    }
+    cout << "Lagragean Heuristic Solution is " << z << endl;
+    if (z > bestLagrHeur)
+        bestLagrHeur = z;
+}
+
+
+void CE(INSTANCE inp, double ** rc, bool fix2zero)
+{
+
+    double prop0CE = 0.30;
+    int N          = 1000;
+    double rho     = 0.2;
+    double alpha   = 0.8;
+    int maxCE      = 500;
+    int iterCE     = 0;
+    int nFixed     = 0;
+
+    for (int i = 0; i < inp.nC; i++)
+        for (int j = 0; j < inp.ri[i]; j++)
+            F0[i][j] = 0;
+
+    fix2zero = 0;
+    if (fix2zero)
+    {
+
+        find_worst(F0, rc, prop0CE);    
+
+#ifdef M_DEBUG
+        cout << "List of columns fixed to zero (" << prop0CE << ") :: " << endl;
+        for (int i = 0; i < inp.nC; i++) 
+        {
+            cout << "class (" << i << ") :: ";
+            for (int j = 0; j < inp.ri[i]; j++) 
+                cout << " " << rc[i][j];
+            cout << endl;
+            for (int j = 0; j < inp.ri[i]; j++) 
+            {
+                if (F0[i][j] == 1)
+                    cout << " " << j;
+            }
+            cout << endl;
+        }
+#endif
+    }
+
+    // Note: rc can be both positive and negative
+    // We shift everything by the minimum value and, this way,
+    // we effectively prevent from selecting the item with min rc
+    int ** xCE  = new int*[N];
+    for (int i  = 0; i < N; i++)
+        xCE[i]  = new int[inp.nC];
+
+    double * z  = new double[N];
+    int * index  = new int[N];
+    double ** p = new double*[inp.nC];
+    for (int i  = 0; i < inp.nC; i++)
+    {
+        if (fix2zero)
+            nFixed = ceil(prop0CE*(double)inp.ri[i]);	
+        p[i] = new double[inp.ri[i]];
+        double totL = 0.0;
+        double minL = INFTY;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            if (F0[i][j] == 0)
+            {
+                if (rc[i][j] < minL)
+                    minL = rc[i][j];
+                totL += rc[i][j];
+            }
+        }
+        // shift rc if the min is negative
+        if (minL < 0.0)
+            totL += (inp.ri[i]-nFixed)*minL;
+        else
+            minL = 0.0;
+
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            if (F0[i][j] == 1)
+                p[i][j] = 0.0;
+            else
+                p[i][j] = (minL + rc[i][j]) / totL;
+
+        }
+    }
+#ifdef M_DEBUG
+    // check probabilities
+    for (int i  = 0; i < inp.nC; i++)
+    {
+        cout << "c( " << i << ") == ";
+        double totP = 0.0;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            cout << " " << p[i][j];
+            totP += p[i][j];
+        }
+        cout << " \t TOT = " << totP << endl;
+    }
+#endif
+
+
+    for (int kk = 0; kk < maxCE; kk++) 
+    {
+
+        int generate = 0;
+        for (int k = 0; k < N; k++) 
+        {
+            do
+            {
+                generate = 0;
+                for (int i = 0; i < inp.nC; i++) 
+                {
+
+                    // select item for this class
+                    double rr   = (double)(rand()+1)/((double)(RAND_MAX)+1.0);
+                    int j       = 0;
+                    double totP = 0.0;
+                    while (totP + p[i][j] < rr)
+                    {
+                        totP += p[i][j];
+                        j++;
+                    }
+                    xCE[k][i] = j;
+                }
+                // if feasible, compute fitness value
+                if (is_feasible(inp, xCE[k]))
+                    z[k] = compute_fitness(inp, xCE[k]);
+                else
+                {
+                    generate += 1;
+                    if (generate > 100)
+                    {
+                        cout << "PROBLEMS with CE here ... " << endl;
+                        int abc;
+                        cin >> abc;
+                    }
+
+                }
+            }
+            while (generate > 0);
+        }    
+
+        // sort and find quantiles (ascending order)
+        for (int i = 0; i < N; i++) 
+            index[i]= i;
+        quickSort(z, index, 0,N-1); 
+
+        int limit = (int)(rho*(double)N) ;
+
+        if (z[index[N-1]] > zBestCE)
+        {
+            zBestCE = z[index[N-1]];
+            for (int i = 0; i < inp.nC; i++) 
+                xBestCE[i] = xCE[index[N-1]][i];
+
+            cout << "... best CE[" << iterCE << "] = " << zBestCE << endl;
+        }
+
+        // update probs
+        for (int i = 0; i < inp.nC; i++) 
+        {
+            int * y = new int[inp.ri[i]];
+            for (int j = 0; j < inp.ri[i]; j++) 
+                y[j] = 0;
+
+            for (int k = N-limit; k < N; k++) 
+                y[xCE[index[k]][i]]++;
+
+            // update probs for this class
+            for (int j = 0; j < inp.ri[i]; j++) 
+                p[i][j] = alpha*p[i][j] + (1.0-alpha)*(double)y[j]/(double)limit;
+
+            double totP = 0.0;
+            for (int j = 0; j < inp.ri[i]; j++) 
+                totP += p[i][j];
+
+            assert(totP > 1.0-EPSI & totP < 1.0+EPSI);
+        }
+        iterCE++;
+    } // end CE cycle
+}
+
+
+double compute_fitness(INSTANCE inp, int * x)
+{
+    double z = 0.0;
+    for (int i = 0; i < inp.nC; i++) 
+        z += inp.c[i][x[i]];
+    return z;
+}
+
+
 
 /// Lagrangean phase
 /*  The implementation of the lagrangean relaxation coupled with subgradient
@@ -755,13 +800,13 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
     int iter     = 0;
     while (lagrIter < 3 && !stopping_criteria(iter, max_iter, time_limit))
     {
+
+        double zL, bestLagr, worstLagr;
+
         double cWidth     = corridorWidthBase;   // <---------- used to be 0.8
         int iterImproved  = 200;
         int nSol          = nSolBase;		// nr of solutions for cplex
         int Freq          = 40;
-
-        double zL, bestLagr, worstLagr;
-
         double start300  = INFTY;
         double best300   = INFTY;
         double delta     = 0.1;
@@ -778,8 +823,12 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
             if (zL < ubStar)
                 update_best(xLBest, xL, ubStar, zL, lambda, lambdaBest);
 
-            stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, zL, zBest, iter, 
-                    best300, start300);
+            // if (iter > 51)
+            // CE(inp, rc, fix2zero);
+
+            stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, zL, 
+                    zBest, iter, best300, start300);
+
 
             // if (iter > 199) 	// start fixing schemes
             if (iter > 50) 	// start fixing schemes
@@ -790,9 +839,12 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
 
             // refine lagrange solution to obtain a valid lower bound
             if (iter > 100 && (iter % Freq) == 0)
-                lb = refine_solution(model, cplex, x_ilo, obj, xL, cWidth, nSol, zBest, 
-                        xIlo, iterImproved, iter, rc, fix2zero, fix2one, 
+            {
+                // lagrangean_heuristic(inp, rc);
+                lb = refine_solution(model, cplex, x_ilo, obj, xL, cWidth, nSol, zBest,
+                        xIlo, iterImproved, iter, rc, fix2zero, fix2one,
                         cutSol, lagrIter);
+            }
 
             if ((iter > 250) && (iter - iterImproved) > 100)
             {
@@ -800,16 +852,16 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
                 cWidth       *= 0.9;
                 iterImproved  = iter;
                 Freq         /= 2;
-                if (Freq < 5) Freq = 5;
-
-                //cout << "Enhancing corridor to : " << cWidth << " and nsol to " << nSol << endl;
+                if (Freq < 5) 
+                    Freq = 5;
             }
 
             iter++;
         } // end lagrangean cycle
 
         cout << "** ** ** SUMMARY ** ** ** " << endl;
-        cout << "** ** ** Lagrangean Iteration Nr. " << lagrIter << " :: Best LB = " << zBest << endl;
+        cout << "** ** ** Lagrangean Iteration Nr. " << lagrIter 
+            << " :: Best LB = " << zBest << endl;
         cout << setw(49) << " :: Best UB = " << ubStar << endl;
 #ifdef M_DEBUG
         cout << "Before removing cuts " << cplex.getNrows() << " constraints " << endl;
@@ -836,7 +888,7 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
     // store best solution found (save to disk to check feasibility)
     for (int i = 0; i < inp.nC; i++) 
         xBest[i] = xIlo[i];
-    
+
 }
 
 /// Update best solution
@@ -961,12 +1013,6 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
         int lagrIter)
 {
 
-    //int  * F;
-    //int ** F0;
-    //int nFixed1       = 0;
-    //int propFix1      = 0;
-    //double propFixed0 = ZERO;
-
     int nFixed1;
     double width1;
 #ifdef  M_DEBUG 
@@ -988,8 +1034,9 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
     IloEnv env = model.getEnv();
 
-
+    // =======================
     // add corridor constraint
+    // =======================
     IloExpr lhsCorridor(env);
     IloRangeArray neighborhood(env);
     double rhs = cWidth*(double)(inp.nC);
@@ -1000,17 +1047,14 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
     neighborhood.add(lhsCorridor >= rhs);
     model.add(neighborhood);
 
-
     IloExpr lhs0(env);
     IloRangeArray fix_to_zero(env);
     IloExpr lhs(env);
     IloRangeArray cut(env);
     int count0 = 0;
 
-
     if (fix2zero)
     {
-
         for (int i = 0; i < inp.nC; i++)
             for (int j = 0; j < inp.ri[i]; j++)
                 F0[i][j] = 0;
@@ -1045,8 +1089,6 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
             if (F[i] != -1)
                 lhs += x_ilo[i][F[i]];
 
-        // cout << " ---- FIxED  to ONE = " << ceil(cWidth*(double)nFixed1) << " over " << nFixed1 << endl << endl;
-
         cut.add(lhs >= width1);
         model.add(cut);
     }
@@ -1068,7 +1110,6 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
         int * xRepaired = new int[inp.nC];
         get_cplex_sol(model, cplex, x_ilo, xRepaired);
         //cut_out_solution(model, cplex, x_ilo, xRepaired, cutSol);
-
 #ifdef M_DEBUG
         cout << "Nr. Constraints after cutting out solutions is : " << cplex.getNrows() << endl;
 #endif
@@ -1089,6 +1130,11 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
             cout << "... improved best lb(" << iter << ") = " << zBest << " found after " 
                 << best_time << " seconds." << endl;
+#ifdef M_DEBUG
+            cout << "Nr constraints before adding CUTS is " << cplex.getNrows() << endl;
+            add_cover_inequality2(model, cplex, x_ilo, xRepaired, Omega, sigma2);
+            cout << "Nr constraints after adding CUTS is " << cplex.getNrows() << endl;
+#endif
 
 #ifdef M_DEBUG
             cout << "... corridor width restored to " << cWidth << endl;
@@ -1126,9 +1172,11 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
                     for (int j = 0; j < inp.ri[i]; j++)
                     {
                         if (xIlo[i] == j)
-                            cout << "x(" << i << "," << j << ") = 1  vs rc = " << rc[i][j] << " vs " << F0[i][j] << endl;
+                            cout << "x(" << i << "," << j << ") = 1  vs rc = " 
+                                << rc[i][j] << " vs " << F0[i][j] << endl;
                         else
-                            cout << "x(" << i << "," << j << ") = 0  vs rc = " << rc[i][j] << " vs " << F0[i][j] << endl;
+                            cout << "x(" << i << "," << j << ") = 0  vs rc = " 
+                                << rc[i][j] << " vs " << F0[i][j] << endl;
                     }
                 }
 
@@ -1162,8 +1210,8 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
     model.remove(neighborhood);
     lhsCorridor.end();
 
-    //cout << "Nr constraints after removing ALL CUTS is " << cplex.getNrows() << endl;
 
+    //cout << "Nr constraints after removing ALL CUTS is " << cplex.getNrows() << endl;
     return statusBin;
 }
 
@@ -1228,6 +1276,321 @@ void find_worst(int ** F0, double ** rc, double propFixed0)
 }
 
 
+
+// Second version
+void add_cover_inequality2(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
+        int * x, double Omega, double * sigma2)
+{
+    IloEnv env = model.getEnv();
+#ifdef M_DEBUG
+    cout << "Feasible solution is :: ";
+    for (int i = 0; i < inp.nC; i++) 
+        cout << " " << x[i];
+    cout << endl;
+#endif
+    double * maxW  = new double[inp.nR];
+    double * W     = new double[inp.nR];
+    double * slack = new double[inp.nR];
+    for (int k = 0; k < inp.nR; k++) 
+    {
+        W[k] = 0.0;
+        maxW[k] = 0.0;
+        for (int i = 0; i < inp.nC; i++)
+        {
+            W[k] += inp.w[i][x[i]][k];
+            if (inp.w[i][x[i]][k] > maxW[k])
+                maxW[k] = inp.w[i][x[i]][k];
+        }
+        // cout << "Checking constraint " << k << " LHS = " << W[k] + Omega*sqrt(Q[k])
+        // << " vs RHS = " << inp.R[k] << endl;
+        slack[k] = inp.R[k] - W[k];
+        assert(slack[k] >= 0.0);
+    }
+
+    int nCovers = 0;
+    int isCover = -1;
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        // cout << "COVERS for CLASS " << i << endl;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            isCover = -1;
+            if (x[i] == j) continue;
+            // cout << " ... trying with item " << j << endl;
+            for (int k = 0; k < inp.nR; k++) 
+            {
+                double delta = -inp.w[i][x[i]][k] + inp.w[i][j][k];
+                if (delta > slack[k])
+                {
+                    // is this cover minimal?
+                    if (is_minimal_cover(inp, x, delta-slack[k], i, j, k) == 1)
+                    {
+                        // cout << "-----> constraint " << k << " is violated " << endl;
+                        isCover = k; // constraint for which the cover is built
+                        break;
+
+                    }
+                }       
+            }
+            // if infeasible, it is a cover
+            if (isCover != -1)
+            {
+                // add cover
+                nCovers++;
+                IloExpr lhs(env);
+                for (int l = 0; l < inp.nC; l++) 
+                {
+                    if (l == i) continue;
+                    lhs += x_ilo[l][x[l]];
+                    // cout << " " << x[l];
+                }
+                // cout << " + x[" << i << "," << j << " ] " << endl;
+                lhs += x_ilo[i][j];
+
+                // uplift the cover
+                IloExpr uplifted(env);
+                uplift_cover(inp, uplifted, x_ilo, isCover, x, i, j);
+                model.add(lhs + uplifted <= inp.nC - 1);
+            }
+        }
+    }
+    cout << " ## ## ## ADDED " << nCovers << " covers. " << endl;
+}
+
+int is_minimal_cover(INSTANCE & inp, int * x, double excess, int group, int el,
+        int constr)
+{
+
+    // cout << "IS IT A MINIMAL COVER ? " << endl;
+    // cout << " .. excess is = " << excess << endl;
+    int * xAux = new int[inp.nC];
+    for (int i = 0; i < inp.nC; i++) 
+        xAux[i] = x[i];
+    xAux[group] = el;
+
+    double maxInCover = 0.0;
+    int maxClass   = -1;
+    // find max value in cover for constraint "constr"
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        if (inp.w[i][xAux[i]][constr] > maxInCover)
+        {
+            maxInCover = inp.w[i][xAux[i]][constr]; 
+            maxClass   = i;
+        }
+    }
+    // cout << ".. max consumption is in class " << maxClass << " with value = "
+    // << maxInCover << endl;
+
+    // find max elements in maxClass
+    double maxNotInCover = 0.0;
+    for (int j = 0; j < inp.ri[maxClass]; j++) 
+    {
+        if (j == xAux[maxClass]) continue;
+        if (inp.w[maxClass][j][constr] > maxNotInCover)
+            maxNotInCover = inp.w[maxClass][j][constr];
+    }
+    // cout << ".. swap with max not in cover = " << maxNotInCover << endl;
+
+    // if we swap, is it feasible?
+    if (excess - maxInCover + maxNotInCover <= 0.0)
+        return 1;
+    else
+        return -1;
+
+}
+
+
+
+
+void uplift_cover(INSTANCE inp, IloExpr & uplifted, TwoD & x_ilo, int isCover, 
+        int * x, int group, int el)
+{
+    // cout << " CONSTRAINT " << isCover << endl;
+    // sort coefficients from max to min
+    int tempSol = x[group];
+    x[group] = el; 
+    /*
+       cout << "The COVER is ";
+       for (int i = 0; i < inp.nC; i++) 
+       cout << " " << x[i];
+       cout << endl;
+       */ 
+    double * w = new double[inp.nC];
+    int * index = new int[inp.nC];
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        index[i] = i; 
+        w[i] = inp.w[i][x[i]][isCover];
+    }   
+    quickSort(w, index, 0, inp.nC-1); // sort from min to max
+
+
+    double * lower = new double[inp.nC-1];
+    double * upper = new double[inp.nC-1];
+    double progr = 0.0;
+    for (int i = 0; i < inp.nC-1; i++) 
+    {
+        lower[i] = progr;
+        upper[i] = progr + w[index[inp.nC-1-i]];
+        progr += w[index[inp.nC-1-i]];
+    }
+#ifdef M_DEBUG
+    for (int i = 0; i < inp.nC-1; i++) 
+    {
+        cout << "lower = " << lower[i] << " and upper " << upper[i] << endl;
+    }
+#endif
+
+    std::vector < std::vector <int> > cols;
+    std::vector < std::vector <int> > coeffs;
+
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        // cout << " CLASS " << i << " with x[" << i << "] = " << x[i] << endl;
+        std::vector <int> auxi;
+        std::vector <int> auxc;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            if (j == x[i]) continue;
+            // cout << "... trying item " << j << endl;
+            int l = 0;
+            while (inp.w[i][j][isCover] >= upper[l])
+                l++;
+            if (l > 0)
+            {
+                auxi.push_back(j);
+                auxc.push_back(l);
+            }
+        }
+
+        // saving variables for current class
+        cols.push_back(auxi);
+        coeffs.push_back(auxc);
+#ifdef M_DEBUG
+        cout << "For class " << i << " we have ;; " << endl;
+        int j = 0;
+        for (std::vector<int>::iterator it = auxc.begin(); it != auxc.end(); ++it) 
+        {
+            cout << "item[" << i << "," << auxi[j] << "] = " << inp.w[i][auxi[j]][isCover] 
+                << " in interval " << *it << endl;
+            j++;
+        }
+#endif  
+
+    }
+    // cout << "SUMMARY for the VALID INEQUALITY " << endl;
+    for (int i = 0; i < inp.nC; i++) 
+        for (int j = 0; j < cols[i].size(); j++) 
+        {
+            // cout << " x[ " << i << "," << cols[i][j] << " ] with coeff " << coeffs[i][j] << endl;
+            uplifted += x_ilo[i][cols[i][j]]*coeffs[i][j];
+
+        }
+    // is facet defining?
+    double totS = 0.0;
+    for (int i = 0; i < inp.nC; i++) 
+        totS += w[i];
+
+    int isFacet = 1;
+    for (int h = 0; h < inp.nC; h++) 
+    {
+
+        totS -= w[index[inp.nC-1-h]];
+        double rhs = inp.R[isCover] - w[index[inp.nC-1-h]];
+        if (rhs < totS)
+        {
+            isFacet = 0;
+            break;
+        }
+    }
+    if (isFacet == 1)
+    {
+        cout << " FACET DEFINING " << endl;
+        int aka;
+        cin >> aka;
+    }
+    // restore solution
+    x[group] = tempSol;
+}
+
+// Generate a cover inequality starting from the current feasible solution
+void add_cover_inequality(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
+        int * x, double Omega, double * sigma2)
+{
+    IloEnv env = model.getEnv();
+#ifdef M_DEBUG
+    cout << "Feasible solution is :: ";
+    for (int i = 0; i < inp.nC; i++) 
+        cout << " " << x[i];
+    cout << endl;
+#endif
+    double * W     = new double[inp.nR];
+    double * Q     = new double[inp.nR];
+    double * slack = new double[inp.nR];
+    for (int k = 0; k < inp.nR; k++) 
+    {
+        W[k] = 0.0;
+        Q[k] = 0.0;
+        for (int i = 0; i < inp.nC; i++)
+        {
+            W[k] += inp.w[i][x[i]][k];
+            Q[k] += sigma2[i]; 
+        }
+        // cout << "Checking constraint " << k << " LHS = " << W[k] + Omega*sqrt(Q[k])
+        // << " vs RHS = " << inp.R[k] << endl;
+        slack[k] = inp.R[k] - W[k] + Omega*sqrt(Q[k]);
+        assert(slack[k] >= 0.0);
+    }
+
+    int nCovers = 0;
+    int isCover = 0;
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        // cout << "COVERS for CLASS " << i << endl;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            isCover = 0;
+            if (x[i] == j) continue;
+            // cout << " ... trying with item " << j << endl;
+            for (int k = 0; k < inp.nR; k++) 
+            {
+                // note: Q does not change because sigma_ij are all same
+                double delta = -inp.w[i][x[i]][k] + inp.w[i][j][k] -sqrt(Q[k]) +
+                    sqrt(Q[k] - sigma2[i] + sigma2[i]);
+                if (delta > slack[k])
+                {
+                    // cout << "-----> constraint " << k << " is violated " << endl;
+                    isCover = 1;
+                    break;
+                }
+
+            }
+            // if infeasible, it is a cover
+            if (isCover)
+            {
+                // add cover
+                nCovers++;
+                IloExpr lhs(env);
+                for (int l = 0; l < inp.nC; l++) 
+                {
+                    if (l == i) continue;
+                    lhs += x_ilo[l][x[l]];
+                    // cout << " " << x[l];
+                }
+                // cout << " + x[" << i << "," << j << " ] " << endl;
+                lhs += x_ilo[i][j];
+                model.add(lhs <= inp.nC - 1);
+            }
+        }
+    }
+    cout << " ## ## ## ADDED " << nCovers << " covers. " << endl;
+
+
+}
+
+
+
 /// Add cut to exclude current solution from feasible space
 void cut_out_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo, int * xIlo, IloRangeArray & cutSol)
 {
@@ -1262,38 +1625,203 @@ void add_z_cut(IloModel & model, IloCplex & cplex, TwoD & x_ilo, double zBest)
 
     model.add(lhs >= zBest);    
 }
+// sort vector x with respect to rc
+void quickSort(double* rc, int* x, int low, int high)
+{
+    int  temp, left, right;
+    long double median;
 
+    if (high > low)
+    {
+        left   = low;
+        right  = high;
+        median = rc[x[low]];
+
+        while (right > left)
+        {
+            while ( rc[x[left]] < median )
+                left++;
+
+            while (rc[x[right]] > median)
+                right--;
+
+            if (left > right) break;
+
+            temp		= x[left];
+            x[left]  	= x[right];
+            x[right] 	= temp;
+
+            left++;
+            right--;
+        }
+
+        quickSort(rc, x, low, right);
+        quickSort(rc, x, left,  high);
+    }
+}
 // sort vector x with respect to rc
 void quickSort(int* rc, int* x, int low, int high)
 {
-	int  temp, left, right, median;
-	
-	if (high > low)
-	{
-		left   = low;
-		right  = high;
-		median = rc[x[low]];
-		
-		while (right > left)
-		{
-			while ( rc[x[left]] < median )
-				left++;
-			
-			while (rc[x[right]] > median)
-				right--;
-			
-			if (left > right) break;
-			
-			temp		= x[left];
-			x[left]  	= x[right];
-			x[right] 	= temp;
-		
-			left++;
-			right--;
-		}
-		 
-		quickSort(rc, x, low, right);
-		quickSort(rc, x, left,  high);
-	}
+    int  temp, left, right, median;
+
+    if (high > low)
+    {
+        left   = low;
+        right  = high;
+        median = rc[x[low]];
+
+        while (right > left)
+        {
+            while ( rc[x[left]] < median )
+                left++;
+
+            while (rc[x[right]] > median)
+                right--;
+
+            if (left > right) break;
+
+            temp		= x[left];
+            x[left]  	= x[right];
+            x[right] 	= temp;
+
+            left++;
+            right--;
+        }
+
+        quickSort(rc, x, low, right);
+        quickSort(rc, x, left,  high);
+    }
 }
+
+// Simulate the creation of nRuns random vectors w[i][j][k] and compute how 
+// often the robust and the nominal solutions lead to infeasible situations.
+/** It is worth noting that, in reality, we do not need to compute the number
+ * of times the nominal solution leads to infeasibility, since the nominal 
+ * solution never changes. However, since for every value of Omega we generate
+ * different w vectors, we recompute the number of infeasibility for the 
+ * nominal solution as well. This number should be pretty much constant.
+ */
+void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNominal,
+        double zBest, int nRuns, double SSsigma)
+{
+
+    cout << "This is the current solution ;; " << endl;
+    cout << "z^N vs z^R = " << zNominal << " " << zBest << endl;
+    // cout << "CM solution :: ";
+    // for (int i = 0; i < inp.nC; i++)
+    // {
+    // cout << " " << xBest[i];
+    // }
+    // cout << endl;
+    // cout << "NOMINAL solution :: ";
+    // for (int i = 0; i < inp.nC; i++)
+    // {
+    // cout << " " << xNominal[i];
+    // }
+
+    // now evaluate solution with random generated 
+    int ** wN = new int*[inp.nC];
+    for (int i = 0; i < inp.nC; i++)
+        wN[i] = new int[inp.nR];
+
+    int ** wR = new int*[inp.nC];
+    for (int i = 0; i < inp.nC; i++)
+        wR[i] = new int[inp.nR];
+
+    // =============== EVAL ======================
+    int totInfeasible        = 0;
+    int totInfeasibleNominal = 0;
+    for (int cc = 0; cc < nRuns; cc++)
+    {
+        // cout << "Iter " << cc << endl;
+
+        for (int i = 0; i < inp.nC; i++)
+        {
+            for (int k = 0; k < inp.nR; k++)
+            {
+                double rr = (double)(rand()+1)/((double)(RAND_MAX)+1.0);
+                if (rr <= 0.5)
+                {
+                    wR[i][k] = inp.w[i][xBest[i]][k] - sigma2[i];
+                    wN[i][k] = inp.w[i][xNominal[i]][k] - sigma2[i];
+                }
+                else
+                {
+                    wN[i][k] = inp.w[i][xNominal[i]][k] + sigma2[i];
+                    wR[i][k] = inp.w[i][xBest[i]][k] + sigma2[i];
+                }
+            }
+        }
+
+        // this is what we have done
+        /* cout << "Comparison of nominal vs real :: " << endl;
+         * for (int i = 0; i < inp.nC; i++)
+         * {
+         *     cout << "Item " << xBest[i] << " ... " << endl;
+         *     for (int k = 0; k < inp.nR; k++)
+         *     {
+         *         cout << inp.w[i][xBest[i]][k] << " vs " << wR[i][k] << endl;
+         *     }
+         * } */
+
+        // is robust solution feasible?
+        for (int k = 0; k < inp.nR; k++)
+        {
+            double tot = 0.0;
+            for (int i = 0; i < inp.nC; i++) 
+                tot += wR[i][k];
+            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
+            if (tot > inp.R[k])
+            {
+                // cout << "Infeasible in constraint " << k << endl;
+                totInfeasible++;
+
+                break;
+            }
+        }
+
+        // is nominal solution feasible?
+        for (int k = 0; k < inp.nR; k++)
+        {
+            double tot = 0.0;
+            for (int i = 0; i < inp.nC; i++) 
+                tot += wN[i][k];
+            // cout << "lhs = " << tot << " vs rhs = " << inp.R[k] << endl;
+            if (tot > inp.R[k])
+            {
+                // cout << "Infeasible in constraint " << k << endl;
+                totInfeasibleNominal++;
+                break;
+            }
+        }
+    }
+
+    cout << " [" << totInfeasible << "/" << nRuns << "]" 
+        << endl;
+
+    cout << " [" << totInfeasibleNominal << "/" << nRuns << "]" 
+        << endl;
+
+    string sRatio;
+    if (zBest != -1)
+    {
+        double ratio = (zNominal - zBest)/zNominal;
+        stringstream ss;
+        ss << ratio;
+        sRatio = ss.str();
+    }
+    else
+        sRatio = "-";
+
+
+
+    // write info to diskfile
+    ofstream fRandom("robust.txt", ios::out);
+    fRandom << zNominal << "\t" << totInfeasibleNominal << "\t" 
+        << zBest << "\t" << sRatio << "\t" << Omega << "\t" << 
+        SSsigma/(double)inp.nC << "\t" 
+        << totInfeasible << "\t" << nRuns << endl; 
+    fRandom.close();
+}
+
 
