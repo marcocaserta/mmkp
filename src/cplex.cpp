@@ -98,7 +98,7 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         // define SOCP model (assuming sigma_ij are different)
         defineRobustModel(model, cplex, x_ilo, obj, Q_ilo, Omega, sigma2);
         // defineRobustDet(model, cplex, x_ilo, obj, Omega, SSsigma, u);
-        statusBin = solve_KNAP(model, cplex, 99999, 2, 10); // call cplex
+        statusBin = solve_KNAP(model, cplex, 99999, 2, 10000); // call cplex
     }
     catch(IloException& e)
     {
@@ -187,7 +187,6 @@ double defineModel(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjectiv
 double defineRobustBertsimas(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjective & obj, double Omega, double sigma, double u)
 {
     IloEnv env = model.getEnv();
-
     // multi-choice constraint
     for (int i = 0; i < inp.nC; i++)
     {
@@ -197,7 +196,6 @@ double defineRobustBertsimas(IloModel & model, IloCplex & cplex, TwoD & x_ilo, I
 
         model.add(sum == 1.0);
     }
-
     // add objective function
     for (int i = 0; i < inp.nC; i++)
         for (int j = 0; j < inp.ri[i]; j++)
@@ -205,8 +203,6 @@ double defineRobustBertsimas(IloModel & model, IloCplex & cplex, TwoD & x_ilo, I
     model.add(obj);
 
     // robust constraint
-    cout << "Omega and sigma are :" << Omega << " " << sigma << endl;
-    cout << "... with u = " << u << endl;
     double CC = sqrt(sigma)*Omega*sqrt(u)/2.0;
     double coeff = 0.0;
     for (int k = 0; k < inp.nR; k++)

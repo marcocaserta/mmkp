@@ -32,6 +32,17 @@ using namespace std;
 
 double select_corridor_width_base(double r)
 {
+   if (r < 0.20)
+        return 0.10;
+    else if(r < 0.40)
+        return 0.20;
+    else if(r < 0.50)
+        return 0.50;
+    else if(r < 0.80)
+        return 0.75;
+   else
+        return 0.9;
+/*
      if (r < 0.25)
         return 0.75;
     else if(r < 0.50)
@@ -40,7 +51,7 @@ double select_corridor_width_base(double r)
         return 0.90;
     else
         return 0.95;
-/*   if (r < 0.25)
+   if (r < 0.25)
         return 0.25;
     else if(r < 0.50)
         return 0.50;
@@ -72,6 +83,15 @@ int select_nSol_base(double r)
 
 double select_zero_base(double r)
 {
+    if (r < 0.25)
+        return 0.6;
+    else if(r < 0.50)
+        return 0.7;
+    else if (r < 0.75)
+        return 0.8;
+    else
+        return 0.85;
+
  /*    if (r < 0.25)
         return 0.4;
     else if(r < 0.50)
@@ -86,14 +106,16 @@ double select_zero_base(double r)
 double select_one_base(double r)
 {
 
-    if (r < 0.25)
+    if (r < 0.20)
         return 0.0;
-    else if(r < 0.50)
+    else if(r < 0.40)
         return 0.05;
-    else if (r < 0.75)
-        return 0.075;
-    else
+    else if (r < 0.60)
         return 0.10;
+    else if (r < 0.8)
+        return 0.15;
+    else
+        return 0.25;
 }
 
 int select_cut(double r)
@@ -116,7 +138,7 @@ double SampleDecoder::decode(const std::vector< double >& chromosome) const
     int add_z_cut            = select_cut(chromosome[4]);
 
 
-    string sBase = "./bin/mmkp -f ../data/I08.txt ";
+    string sBase = "./bin/mmkp -f ../data/I13.txt ";
     stringstream s1;
     s1 << corridorWidthBase;
     stringstream s2;

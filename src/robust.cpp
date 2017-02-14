@@ -271,8 +271,6 @@ double defineRobustModel(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
         model.add(sum + Omega*Q_ilo <= inp.R[k]);
         sum.end();
     }
-
-
     // multi-choice constraint    
     for (int i = 0; i < inp.nC; i++)
     {
@@ -282,7 +280,6 @@ double defineRobustModel(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
         model.add(sum == 1.0);
     }
-
     // add objective function
     for (int i = 0; i < inp.nC; i++)
         for (int j = 0; j < inp.ri[i]; j++)

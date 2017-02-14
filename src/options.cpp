@@ -36,8 +36,8 @@
 #define   PROP_ZERO_def   0.0
 #define   PROP_ONE_def    0.0
 #define   ADD_CUT_def     0
-#define   OMEGA_def       1.0
-#define   SIGMA_SQ_def    1.0
+#define   OMEGA_def       0.0
+#define   SIGMA_SQ_def    0.0
 
 using namespace std;
 
