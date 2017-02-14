@@ -95,17 +95,17 @@ struct INSTANCE {
     int   * R;    // r.h.s. values of the knapsack constraints
 };
 
-INSTANCE inp;         // INSTANCE DATA
+INSTANCE inp;     // INSTANCE DATA
 
-double * sigma2;     // sigma^2 for robust formulation
-int  * F;             // F[i] = 3 ==> var 3 in class "i" is set to 1
-int **F0;             // F0[i][j] = 1 ==> var x_{ij} is set to 0
-
-double best_time;     // time to best solution
-int bestIter;         // lagr iteration in which best was found
-double zBest;         // best feasible solution (lower bound)
-double ubStar;        // best upper bound (lagr solution)
-int * xBest; // best solution overall
+double * sigma2;  // sigma^2 for robust formulation
+int  * F;         // F[i] = 3 ==> var 3 in class "i" is set to 1
+int **F0;         // F0[i][j] = 1 ==> var x_{ij} is set to 0
+int **fF0;        // permanently fixed to 0 (based on gap)
+double best_time; // time to best solution
+int bestIter;     // lagr iteration in which best was found
+double zBest;     // best feasible solution (lower bound)
+double ubStar;    // best upper bound (lagr solution)
+int * xBest;      // best solution overall
 
 // definition of constant values
 double INFTY = std::numeric_limits<double>::infinity();
@@ -128,14 +128,14 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex, TwoD &
 double get_first_lb(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjective & obj, 
         int nSol, IloNumVar & Q_ilo, double Omega, double sigma);
 void update_best(int * xLBest, int * xL, double & ubStar, double zL, double * lambda, double * lambdaBest);
-double corridor_method(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
-        IloObjective & obj, int * xLBest, double & zBest, double ** rc, int * xIlo);
 double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjective & obj, int * xL, 
         double & cWidth, int & nSol, double & zBest, int * xIlo, int & iterImproved, 
         int iter, double ** rc, bool fix2zero, bool fix2one, IloRangeArray & cutSol,
         int lagrIter);
 void find_best(int * F, double ** rc);
+void find_best(int * F, double * delta);
 void find_worst(int ** F0, double ** rc, double propFixed0);
+void find_kworst(int ** F0, double ** rc, double propFixed0);
 void cut_out_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo, int * xIlo, IloRangeArray & cutSol);
 void add_z_cut(IloModel & model, IloCplex & cplex, TwoD & x_ilo, double zBest);
 
@@ -178,6 +178,7 @@ int is_minimal_cover(INSTANCE & inp, int * x, double excess, int group, int el,
 void solve_bertsimas(INSTANCE & inp, IloModel &model, IloCplex & cplex, 
         TwoD & x_ilo, IloObjective & obj, double Omega, double sigma);
 void solve_relaxed(IloModel model, TwoD x_ilo, double ** xLP, int * xL);
+void compute_stability(INSTANCE & inp, double ** rc, double * delta, int * xL);
 /*****************************************************************************/
 /*                      END FUNCTIONS                                        */
 /*****************************************************************************/
@@ -227,10 +228,16 @@ int main(int argc, char *argv[])
     tTime.resetTime();
 
     // vectors used to defined variables fixed to 0 and 1
-    F  = new int[inp.nC];
-    F0 = new int*[inp.nC];
+    F   = new int[inp.nC];
+    F0  = new int*[inp.nC];
+    fF0 = new int*[inp.nC];
     for (int i = 0; i < inp.nC; i++)
-        F0[i] = new int[inp.ri[i]];
+    {
+        F0[i]  = new int[inp.ri[i]];
+        fF0[i] = new int[inp.ri[i]];
+        for (int j = 0; j < inp.ri[i]; j++) 
+            fF0[i][j] = 0;
+    }
     zBest  = ZERO;
     ubStar = INFTY;
     xBest  = new int[inp.nC]; // store best solution
@@ -261,7 +268,7 @@ int main(int argc, char *argv[])
     lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
     // cout << "BEST LAGRANGEAN FOUND = " << bestLagrHeur << endl;
     // robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-            // sigma2);
+    // sigma2);
 
     fsol << _FILENAME << "\t" << zBest << "\t" << best_time << "\t" 
         << ubStar << "\t" << bestIter << "\t" << corridorWidthBase 
@@ -276,18 +283,24 @@ int main(int argc, char *argv[])
     fIrace << -zBest << endl;
     env.end();
 
-#ifdef W_OPT
-    // save best solution to disk
-    ofstream ffsol(solutionFile, ios::out);
-    for (int i = 0; i < inp.nC; i++) 
-        ffsol << xBest[i] << "\t";
-    ffsol << endl;
-#endif
-    // #ifdef W_ANALYSIS
+// #ifdef W_OPT
+    cout << "Do you want to rewrite the opt solution on disk? (1 --> Yes) ";
+    int answer;
+    cin >> answer;
+    if (answer == 1)
+    {
+        // save best solution to disk
+        ofstream ffsol(solutionFile, ios::out);
+        for (int i = 0; i < inp.nC; i++) 
+            ffsol << xBest[i] << "\t";
+        ffsol << endl;
+    }
+// #endif
+#ifdef W_ANALYSIS
     // analysis of robust solution for I07 --> zBest (nominal) = 24595
     int nRuns       = 1000;
     robust_simulation(inp, xBest, xNominal, zNominal, zBest, nRuns, SSsigma);
-    // #endif
+#endif
     return zBest;		// return value to brkGA for 
 
 }
@@ -613,7 +626,7 @@ void CE(INSTANCE inp, double ** rc, bool fix2zero)
     if (fix2zero)
     {
 
-        find_worst(F0, rc, prop0CE);    
+        find_worst(F0, rc, prop0CE);
 
 #ifdef M_DEBUG
         cout << "List of columns fixed to zero (" << prop0CE << ") :: " << endl;
@@ -839,8 +852,8 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
         double zL, bestLagr, worstLagr;
 
-        double cWidth    = corridorWidthBase;   // <---------- used to be 0.8
-        int nSol         = nSolBase;		// nr of solutions for cplex
+        double cWidth    = corridorWidthBase; // <---------- used to be 0.8
+        int nSol         = nSolBase;          // nr of solutions for cplex
         double start300  = INFTY;
         double best300   = INFTY;
         int iterImproved = 200;
@@ -861,6 +874,16 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
             // if (iter > 51)
             // CE(inp, rc, fix2zero);
+            int count0 = 0;
+            for (int i = 0; i < inp.nC; i++) 
+                for (int j = 0; j < inp.ri[i]; j++) 
+                    if (fF0[i][j] == 0)
+                        if (zL - rc[i][xL[i]] + rc[i][j] <= zBest)
+                        {
+                            fF0[i][j] = 1;
+                            count0++;
+                            model.add(x_ilo[i][j] == ZERO);
+                        }
 
             stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, zL, 
                     zBest, iter, best300, start300);
@@ -921,7 +944,8 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
 
 /// Update best solution
-void update_best(int * xLBest, int * xL, double & ubStar, double zL, double * lambda, double * lambdaBest)
+void update_best(int * xLBest, int * xL, double & ubStar, double zL, 
+        double * lambda, double * lambdaBest)
 {
     ubStar = zL;
     for (int i = 0; i < inp.nC; i++)
@@ -957,8 +981,6 @@ double get_first_lb(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjecti
     double statusBin = solve_KNAP(model, cplex, nSol, 0, 10); // call cplex
 
     // double statusBin = solve_KNAP(model, cplex, 9999, 4, 10000); call cplex
-    cout << "Status :: " << statusBin << endl;
-    cout << "CPLEX = " << cplex.getStatus() << endl;
 
     // get solution
     /*     int * xIlo = new int[inp.nC];
@@ -974,65 +996,7 @@ double get_first_lb(IloModel & model, IloCplex & cplex, TwoD & x_ilo, IloObjecti
     return statusBin;
 }
 
-/// NO LONGER USED
-double corridor_method(IloModel & model, IloCplex & cplex, TwoD & x_ilo, 
-        IloObjective & obj, int * xLBest, double & zBest, double ** rc, int * xIlo)
-{
-    IloEnv env = model.getEnv();
-
-#ifdef W_LAGR_COSTS
-    // solve using lagrangean costs + feasibility (i.e., knapsack) constraints
-    for (int i = 0; i < inp.nC; i++)
-        for (int j = 0; j < inp.ri[i]; j++)
-            obj.setLinearCoef(x_ilo[i][j], rc[i][j]);
-    model.add(obj);
-#endif
-
-
-    // add corridor around best feasible solution
-    IloExpr lhsCorridor(env);
-    IloRangeArray neighborhood(env);
-    double rhs = 0.98*(double)(inp.nC);
-
-    for (int i = 0; i < inp.nC; i++)
-        lhsCorridor += x_ilo[i][xIlo[i]];
-
-    neighborhood.add(lhsCorridor >= rhs);
-    model.add(neighborhood);
-
-
-    int iter = 0;
-    bool stopping = false;
-    while(!stopping)
-    {
-        double statusBin = solve_KNAP(model, cplex, 10000, 3, 300);	// call cplex
-
-        cout << "changing objective coefficients to original costs and restart ... " << endl;
-        // evaluate solution (this is needed in the first iter)
-        cout << "z[" << iter << "]  = " << get_cplex_sol(model, cplex, x_ilo, xIlo) << endl;
-
-        cout << "CPLEX Status :: " << cplex.getStatus() << endl;
-
-#ifdef W_LAGR_COSTS
-        for (int i = 0; i < inp.nC; i++)
-            for (int j = 0; j < inp.ri[i]; j++)
-                obj.setLinearCoef(x_ilo[i][j], inp.c[i][j]);
-        model.add(obj);
-#endif
-
-        // remove neighborhood constraint
-        model.remove(neighborhood);
-        lhsCorridor.end();
-        cout << " .... corridor removed ... " << endl;
-
-        iter++;
-
-        if (iter > 1) stopping = true;
-
-    }
-
-    return  -1.0;
-}
+// Solve LP relaxation, with the addition of a "diversity constraint"
 void solve_relaxed(IloModel model, TwoD x_ilo, double ** xLP, int * xL)
 {
     double rhs = (double)inp.nC*propFixed1;
@@ -1091,6 +1055,7 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
     int    nFixed1;
     double width1;
+    std::vector <int> fixed2OneLP;
 
     // FIXING SCHEMES (keep them separate, to activate them at different times)
     //=========================================================================
@@ -1098,15 +1063,18 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
     //=========================================================================
     if (fix2zero)
     {
+
         for (int i = 0; i < inp.nC; i++)
             for (int j = 0; j < inp.ri[i]; j++)
                 F0[i][j] = 0;
 
-        find_worst(F0, rc, propFixed0);    
+        // find_worst(F0, rc, propFixed0);
+        find_kworst(F0, rc, propFixed0);    
     }
 
-    int fixLC = 0;    // activate fix-to-one using Lagrangean costs
-    int fixLP = 1; // activate fix-to-one using LP relaxation
+    int fixLC     = 0; // activate fix-to-one using Lagrangean costs
+    int fixLP     = 0; // activate fix-to-one using LP relaxation
+    int fixStable = 1; // activate fix-to-one using stability criterion
     // if fix-to-one scheme is activated, select strategy
     if (fix2one)
     {
@@ -1122,7 +1090,18 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 
             for (int k = 0; k < nFixed1; k++)
                 find_best(F, rc);
-       }
+        }
+        if (fixStable == 1)
+        {
+            double * delta = new double[inp.nC];
+            compute_stability(inp, rc, delta, xL);
+            for (int i = 0; i < inp.nC; i++)
+                F[i] = -1;
+
+            for (int k = 0; k < nFixed1; k++)
+                find_best(F, delta);
+
+        }
 
         if (fixLP == 1)
         {
@@ -1148,8 +1127,6 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
                 }
                 // cout << endl;
             }
-            cout << "Double ONES :: ";
-            std::vector <int> fixed2OneLP;
             int totOnes = 0;
             for (int i = 0; i < inp.nC; i++) 
             {
@@ -1160,7 +1137,7 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
                     totOnes++;
                 }
             }
-            cout << " ... total = " << totOnes << endl;
+            // cout << " ... total = " << totOnes << endl;
         }
     }
     //=================== end fixing schemes ==================================
@@ -1187,7 +1164,7 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
     IloExpr         lhs1(env);
     IloRangeArray   constraint0(env);
     IloRangeArray   constraint1(env);
- 
+
     //=========================================================================
     // Fix-to-zero :: The matrix F0 has a flag (1/0) to indicate whether a var
     // x_{ij} should be fixed (1) or not (0)
@@ -1197,38 +1174,64 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
     {
         for (int i = 0; i < inp.nC; i++)
             for (int j = 0; j < inp.ri[i]; j++)
-                if (F0[i][j] == 1)
+                if (F0[i][j] == 1 && fF0[i][j] == 0)
                 {
-                    lhs0 += x_ilo[i][j];
+                    // lhs0 += x_ilo[i][j];
                     constraint0.add(x_ilo[i][j] == ZERO);
                     count0++;
                 }
         //fix_to_zero.add(lhs0 == ZERO); // an old way of fixing to zero
         model.add(constraint0);
+        cout << " ... fixed to zero via LC = " << count0 << endl;
     }
     //=========================================================================
 
-    
+
     //=========================================================================
     // Fix-to-one :: The matrix F has a flag (1/0) to indicate whether a var
     // x_{ij} should be fixed (1) or not (0)
     //=========================================================================
     if (fix2one)
     {
-        for (int i = 0; i < inp.nC; i++)
-            if (F[i] != -1)
-                lhs1 += x_ilo[i][F[i]];
-
-        constraint1.add(lhs1 >= width1);
-        model.add(constraint1);
-#ifdef M_DEBUG        
-        for (std::vector<int>::iterator it = fixed2One.begin(); it != fixed2One.end(); ++it) 
+        if (fixStable == 1)
         {
-            // cout << "Fixing to 1 class " << *it << endl;
-            constraint1.add(x_ilo[*it][xL[*it]] == 1.0);
+            int count1 = 0;
+            for (int i = 0; i < inp.nC; i++) 
+            {
+                if (F[i] != -1)
+                {
+                    count1++;
+                    constraint1.add(x_ilo[i][xL[i]] == 1.0);
+                }
+            }
+            cout << " ... fixed to one via Stability = " << count1 << endl;
         }
-        model.add(constraint1);
-#endif        
+
+        if (fixLC == 1)
+        {
+            int count1 = 0;
+            for (int i = 0; i < inp.nC; i++)
+                if (F[i] != -1)
+                {
+                    count1++; 
+                    lhs1 += x_ilo[i][F[i]];
+                }
+
+            constraint1.add(lhs1 >= width1);
+            model.add(constraint1);
+            cout << " ... fixed to one via LC = " << count1 << endl;
+        }
+        if (fixLP == 1)
+        {
+            std::vector<int>::iterator it; 
+            for (it = fixed2OneLP.begin(); it != fixed2OneLP.end(); ++it) 
+            {
+                // cout << "Fixing to 1 class " << *it << endl;
+                constraint1.add(x_ilo[*it][xL[*it]] == 1.0);
+            }
+            model.add(constraint1);
+            cout << " ... fixed to one via LP = " << fixed2OneLP.size() << endl;
+        }
     }
 
     //cout << "Nr constraints after adding ALL CUTS is " << cplex.getNrows() << endl;
@@ -1306,9 +1309,29 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
 }   // END OF refine_solution() -- corridor method
 
 
+void find_best(int * F, double * delta)
+{
+    double bestRC = -INFTY;
+    int group = -1;
+    for (int i = 0; i < inp.nC; i++)
+    {
+        if (F[i] != -1) continue;
+        if (delta[i] > bestRC)
+        {
+            bestRC = delta[i];
+            group  = i;
+        }
+    }
+    if (group != -1)
+        F[group] = 1;
+    else
+    {
+        cout << "Unable to fix variable " << endl;
+        exit(144);
+    }
+}
 
 
-/// Find variables with best lagrangean cost
 void find_best(int * F, double ** rc)
 {
     double bestRC = -INFTY;
@@ -1333,6 +1356,37 @@ void find_best(int * F, double ** rc)
         exit(144);
     }
 }
+
+void find_kworst(int ** F0, double ** rc, double propFixed0)
+{
+
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        int nFixed  = ceil(propFixed0*(double)inp.ri[i]);	
+        int * index = new int[inp.ri[i]];
+        for (int j = 0; j < inp.ri[i]; j++) 
+            index[j] = j;
+        
+        quickSort(rc[i], index, 0, inp.ri[i]-1);
+        int counter = 0;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            int pos = index[j];
+            if (fF0[i][pos] == 1 || F0[i][pos] == 1) continue;
+            F0[i][pos] = 1;
+            counter++;
+            if (counter == nFixed) break;
+        }
+#ifdef M_DEBUG
+        cout << "Fixing to 0 for class " << i << endl;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            cout << "rc["<<j<<"] = " << rc[i][j] << " .. fF = " << fF0[i][j] << " F = " << F0[i][j] << endl;
+        }
+#endif        
+    } 
+}
+
 
 /// Find variables with worst lagrangean costs
 void find_worst(int ** F0, double ** rc, double propFixed0)
@@ -1361,6 +1415,7 @@ void find_worst(int ** F0, double ** rc, double propFixed0)
                 F0[i][item] = 1;
             else
             {
+                break;
                 cout << "something wrong here ... " << endl;
                 exit(123);
             }
@@ -1917,4 +1972,24 @@ void robust_simulation(INSTANCE inp, int * xBest, int * xNominal, double zNomina
     fRandom.close();
 }
 
+// Find second best lagrangean cost for each class
+void compute_stability(INSTANCE & inp, double ** rc, double * delta, int * xL)
+{
 
+    for (int i = 0; i < inp.nC; i++) 
+    {
+        double second = -INFTY;
+        for (int j = 0; j < inp.ri[i]; j++) 
+        {
+            if (xL[i] == j) continue;
+            if (rc[i][j] > second)
+                second = rc[i][j];
+        }
+        delta[i] = rc[i][xL[i]] - second;
+    }
+    // cout << "Stability : " << endl;
+    // for (int i = 0; i < inp.nC; i++)
+    // {
+    // cout << "s[" << i << " ] = " << delta[i] << endl;
+    // }
+}
