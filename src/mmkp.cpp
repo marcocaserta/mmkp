@@ -50,6 +50,7 @@ subgradient optimization.
 ILOSTLBEGIN
 
 #include <iostream>
+#include <string>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
@@ -83,6 +84,7 @@ double sigmaSq;           // parameter of individual item
 ofstream flagr("lagrange.txt", ios::out);
 ofstream fsol("solution.txt", ios::out);
 const char * solutionFile = "optSolution.txt";
+const char * solFileName;
 
 /// Implementation of the basic data structure to hold the instance data
 struct INSTANCE {
@@ -148,7 +150,8 @@ double solve_robust_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         double Omega, double * sigma2, int * xBest, double &zBest);
 
 double solve_nominal_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex, 
-        TwoD & x_ilo, IloObjective & obj, int * xNominal, double & zNominal);
+        TwoD & x_ilo, IloObjective & obj, int * xNominal, double & zNominal,
+        int max_time);
 
 double computeSigmaSq(INSTANCE inp, double * sigma2);
 void robust_lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
@@ -255,17 +258,17 @@ int main(int argc, char *argv[])
 
     // solve_bertsimas(inp, model, cplex, x_ilo, obj, Omega, sigma);
 
-    // double zNominal = -1.0; // obj function value nominal pbr
-    // int * xNominal = new int[inp.nC];
     // NOTE: Activate this to compare Nominal vs Robust
     // To avoid solving the nominal problem all the time, we store the solution
     // in a disk file and simply read the nominal solution from disk.
-    // solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal);
+    solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal,
+            3600);
+    best_time    = tTime.elapsedTime(timer::REAL); // measure wall-clock time
 
     // solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
     // sigma2, xBest, zBest);
     // call lagrangean phase (subgradient optimization)
-    lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
+    // lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
     // cout << "BEST LAGRANGEAN FOUND = " << bestLagrHeur << endl;
     // robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
     // sigma2);
@@ -278,12 +281,30 @@ int main(int argc, char *argv[])
     flagr.close();
     fsol.close();
 
+    // save solution in a named file (contains the name of the instance)
+    string sBase = "solCplex-";
+    int ll = strlen(_FILENAME);
+    for (int i = 0; i < ll; i++) 
+        if (_FILENAME[ll-1-i] == '/')
+        {
+            for (int j = 0; j < ll; j++) 
+                sBase += _FILENAME[ll-i+j];
+            break;
+        }           
+
+    solFileName = sBase.c_str();
+    ofstream fName(solFileName, ios::out);
+    fName << _FILENAME << "\t" << zNominal << "\t" << best_time << endl;
+    fName.close();
+    cout << "Solution saved in file " << solFileName << "." << endl;
+
+
     // irace minimizes (change sign since we are maximizing)
     ofstream fIrace ("solution4irace.txt", ios::out);
     fIrace << -zBest << endl;
     env.end();
 
-// #ifdef W_OPT
+#ifdef W_OPT
     cout << "Do you want to rewrite the opt solution on disk? (1 --> Yes) ";
     int answer;
     cin >> answer;
@@ -295,7 +316,7 @@ int main(int argc, char *argv[])
             ffsol << xBest[i] << "\t";
         ffsol << endl;
     }
-// #endif
+#endif
 #ifdef W_ANALYSIS
     // analysis of robust solution for I07 --> zBest (nominal) = 24595
     int nRuns       = 1000;
@@ -874,6 +895,7 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
 
             // if (iter > 51)
             // CE(inp, rc, fix2zero);
+#ifdef AAA
             int count0 = 0;
             for (int i = 0; i < inp.nC; i++) 
                 for (int j = 0; j < inp.ri[i]; j++) 
@@ -884,7 +906,7 @@ void lagrangean_phase(INSTANCE & inp, IloModel & model, IloCplex & cplex,
                             count0++;
                             model.add(x_ilo[i][j] == ZERO);
                         }
-
+#endif
             stopping = lambda_update(lambda, delta, xL, bestLagr, worstLagr, zL, 
                     zBest, iter, best300, start300);
 
@@ -1072,9 +1094,9 @@ double refine_solution(IloModel & model, IloCplex & cplex, TwoD & x_ilo,
         find_kworst(F0, rc, propFixed0);    
     }
 
-    int fixLC     = 0; // activate fix-to-one using Lagrangean costs
+    int fixLC     = 1; // activate fix-to-one using Lagrangean costs
     int fixLP     = 0; // activate fix-to-one using LP relaxation
-    int fixStable = 1; // activate fix-to-one using stability criterion
+    int fixStable = 0; // activate fix-to-one using stability criterion
     // if fix-to-one scheme is activated, select strategy
     if (fix2one)
     {
