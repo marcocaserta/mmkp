@@ -213,7 +213,7 @@ int main(int argc, char *argv[])
     // read solution from disk file (solutionFile)
     // activate this when robustness study is carried out (to compare the
     // number of infeasible sols reached by nominal vs. robust solution)
-    int feasibilityCheck = 0;
+    int feasibilityCheck = 1;
     double zNominal      = 0.0;
     int * xNominal       = new int[inp.nC];
     xBestCE              = new int[inp.nC];
@@ -261,17 +261,18 @@ int main(int argc, char *argv[])
     // NOTE: Activate this to compare Nominal vs Robust
     // To avoid solving the nominal problem all the time, we store the solution
     // in a disk file and simply read the nominal solution from disk.
-    solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal,
-            3600);
-    best_time    = tTime.elapsedTime(timer::REAL); // measure wall-clock time
+    /* solve_nominal_problem(inp, model, cplex, x_ilo, obj, xNominal, zNominal,
+     *         3600);
+     * best_time    = tTime.elapsedTime(timer::REAL); // measure wall-clock time
+     * cout << "Best sol found in " << best_time << endl; */
 
-    // solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-    // sigma2, xBest, zBest);
+    solve_robust_problem(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
+    sigma2, xBest, zBest);
     // call lagrangean phase (subgradient optimization)
     // lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega, sigmaSq);
     // cout << "BEST LAGRANGEAN FOUND = " << bestLagrHeur << endl;
-    // robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
-    // sigma2);
+    robust_lagrangean_phase(inp, model, cplex, x_ilo, obj, Q_ilo, Omega,
+    sigma2);
 
     fsol << _FILENAME << "\t" << zBest << "\t" << best_time << "\t" 
         << ubStar << "\t" << bestIter << "\t" << corridorWidthBase 
@@ -280,6 +281,17 @@ int main(int argc, char *argv[])
 
     flagr.close();
     fsol.close();
+    
+    // compute hamming distrance between robust and determ solutions
+    int count = 0;
+    for (int i = 0; i < inp.nC; i++) 
+        if (xNominal[i] == xBest[i])
+            count++;
+
+    cout << "Nr. common components " << count << endl;
+    ofstream fCommon("common.txt", ios::app);
+    fCommon << _FILENAME << "\t" << Omega << "\t" << count << endl;
+    fCommon.close();
 
     // save solution in a named file (contains the name of the instance)
     string sBase = "solCplex-";
@@ -314,7 +326,7 @@ int main(int argc, char *argv[])
         ofstream ffsol(solutionFile, ios::out);
         for (int i = 0; i < inp.nC; i++) 
             ffsol << xBest[i] << "\t";
-        ffsol << endl;
+        fifsol << endl;
     }
 #endif
 #ifdef W_ANALYSIS

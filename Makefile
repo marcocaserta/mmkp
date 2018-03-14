@@ -20,10 +20,14 @@ SYSTEM     = x86-64_linux
 
 LIBFORMAT  = static_pic
 # ---------------------------------------------------------------------
-CPLEXDIR      = /home/ubuntu/opt/ibm/ILOG/cplex1261/cplex
-CONCERTDIR    = /home/ubuntu/opt/ibm/ILOG/cplex1261/concert
+# CPLEXDIR      = /home/ubuntu/opt/ibm/ILOG/cplex1261/cplex
+# CONCERTDIR    = /home/ubuntu/opt/ibm/ILOG/cplex1261/concert
+# CONCERTDIR    = /home/marco/opt/ibm/ILOG/cplex127/concert
+# CPLEXDIR      = /home/marco/opt/ibm/ILOG/cplex127/cplex
 # CPLEXDIR      = /home/marco/opt/ibm/cplex1261/cplex
 # CONCERTDIR    = /home/marco/opt/ibm/cplex1261/concert
+CPLEXDIR      = /home/marco/opt/ILOG/cplex127/cplex
+CONCERTDIR    = /home/marco/opt/ILOG/cplex127/concert
 CPLEXBINDIR   = $(CPLEXDIR)/bin/$(BINDIST)
 CPLEXLIBDIR   = $(CPLEXDIR)/lib/$(SYSTEM)/$(LIBFORMAT)
 CONCERTLIBDIR = $(CONCERTDIR)/lib/$(SYSTEM)/$(LIBFORMAT)

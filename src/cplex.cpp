@@ -60,8 +60,8 @@ double solve_nominal_problem(INSTANCE & inp, IloModel & model, IloCplex & cplex,
         int max_time)
 {
     double statusBin = -1;
-    defineModel(model, cplex, x_ilo, obj); // get the first cplex solution
-    statusBin = solve_KNAP(model, cplex, 99999, 0, max_time); // call cplex
+    defineModel(model, cplex, x_ilo, obj); 
+    statusBin = solve_KNAP(model, cplex, 99999, 2, max_time); // call cplex
     zNominal = cplex.getObjValue();
     cout << "Nominal Problem : ====== " << endl;
     cout << "Status :: " << statusBin << endl;
